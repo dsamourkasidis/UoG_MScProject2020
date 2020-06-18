@@ -79,13 +79,12 @@ class GRUTorch(nn.Module):
 
         # ---------------------
         # 3. prepare to run through linear layer
-        self.hidden = self.hidden.contiguous()
+        #self.hidden = self.hidden.contiguous()
         self.hidden = self.hidden.view(-1, self.hidden.shape[2])
 
         # 4. run through actual linear layer
         output = self.fc(self.hidden)
-        #x = self.fc(x)
-
+        # x = self.fc(x)
         return output
 
 
@@ -198,7 +197,7 @@ def evaluate(grumodel, data_directory, args):
         calculate_hit(sorted_list, topk, actions, rewards, reward_click, total_reward,
                       hit_clicks, ndcg_clicks, hit_purchase, ndcg_purchase)
     print('#############################################################')
-    print('total clicks: %d, totteal purchase:%d' % (total_clicks, total_purchase))
+    print('total clicks: %d, total purchases:%d' % (total_clicks, total_purchase))
     for i in range(len(topk)):
         hr_click = hit_clicks[i] / total_clicks
         hr_purchase = hit_purchase[i] / total_purchase
