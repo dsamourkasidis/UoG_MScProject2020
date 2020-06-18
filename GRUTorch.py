@@ -6,6 +6,7 @@ import os
 import time
 import numpy as np
 from torch.utils.data import TensorDataset, DataLoader
+from utility import pad_history, calculate_hit
 
 
 def parse_args():
@@ -31,8 +32,9 @@ def parse_args():
 
 
 class GRUTorch(nn.Module):
-    def __init__(self, hidden_size, item_num, state_size, device, gru_layers=1):
+    def __init__(self, hidden_size, item_num, state_size, device, batch_size, gru_layers=1):
         super(GRUTorch, self).__init__()
+        self.batch_size = batch_size
         self.device = device
         self.hidden_size = hidden_size
         self.item_embeddings = nn.Embedding(
@@ -45,8 +47,8 @@ class GRUTorch(nn.Module):
         self.gru = nn.GRU(
             input_size=self.hidden_size,
             hidden_size=self.hidden_size,
-            num_layers=gru_layers
-            #batch_first=True
+            num_layers=gru_layers,
+            batch_first=True
         )
         self.fc = nn.Linear(self.hidden_size, item_num)
 
@@ -56,54 +58,34 @@ class GRUTorch(nn.Module):
         return hidden
 
     def forward(self, inputs, inputs_lengths):
-        # reset the LSTM hidden state. Must be done before you run a new batch. Otherwise the LSTM will treat
+        # reset the GRU hidden state. Must be done before you run a new batch. Otherwise the LSTM will treat
         # a new batch as a continuation of a sequence
-        batch_size, seq_len = inputs.size()
-        self.hidden = self.init_hidden(batch_size)
+        self.hidden = self.init_hidden(self.batch_size)
 
         # ---------------------
         # 1. embed the input
-        # Dim transformation: (batch_size, seq_len, 1) -> (batch_size, seq_len, embedding_dim)
         x = self.item_embeddings(inputs)
 
         # ---------------------
-        # 2. Run through RNN
-        # TRICK 2 ********************************
-        # Dim transformation: (batch_size, seq_len, embedding_dim) -> (batch_size, seq_len, nb_lstm_units)
-
-        # pack_padded_sequence so that padded items in the sequence won't be shown to the LSTM
+        # 2.
+        # pack_padded_sequence so that padded items in the sequence won't be shown to the GRU
         x = torch.nn.utils.rnn.pack_padded_sequence(x, inputs_lengths, batch_first=True, enforce_sorted=False)
 
-        # now run through LSTM
+        # now run through GRU
         x, self.hidden = self.gru(x, self.hidden)
 
         # undo the packing operation
         x, _ = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
 
         # ---------------------
-        # 3. Project to tag space
-        # Dim transformation: (batch_size, seq_len, nb_lstm_units) -> (batch_size * seq_len, nb_lstm_units)
-
-        # this one is a bit tricky as well. First we need to reshape the data so it goes into the linear layer
-#        x = x.contiguous()
- #       x = x.view(-1, x.shape[2])
+        # 3. prepare to run through linear layer
         self.hidden = self.hidden.contiguous()
         self.hidden = self.hidden.view(-1, self.hidden.shape[2])
 
-        # run through actual linear layer
-  #      x = self.fc(x)
-        self.hidden = self.fc(self.hidden)
+        # 4. run through actual linear layer
+        output = self.fc(self.hidden)
 
-        # ---------------------
-        # 4. Create softmax activations bc we're doing classification
-        # Dim transformation: (batch_size * seq_len, nb_lstm_units) -> (batch_size, seq_len, nb_tags)
-        #X = F.log_softmax(X, dim=1)
-
-        # I like to reshape for mental sanity so we're back to (batch_size, seq_len, nb_tags)
-        #x = x.view(batch_size, seq_len, self.hidden_size)
-
-        #y_hat = x
-        return self.hidden
+        return output
 
 
 def set_device():
@@ -117,35 +99,102 @@ def set_device():
     return device
 
 
+def evaluate(grumodel, data_directory, args):
+    topk = [5, 10, 15, 20]
+    reward_click = args.r_click
+    reward_buy = args.r_buy
+    eval_sessions=pd.read_pickle(os.path.join(data_directory, 'sampled_val.df'))
+    eval_ids = eval_sessions.session_id.unique()
+    groups = eval_sessions.groupby('session_id')
+    batch = 100
+    evaluated=0
+    total_clicks=0.0
+    total_purchase = 0.0
+    total_reward = [0, 0, 0, 0]
+    hit_clicks=[0,0,0,0]
+    ndcg_clicks=[0,0,0,0]
+    hit_purchase=[0,0,0,0]
+    ndcg_purchase=[0,0,0,0]
+    grumodel.eval()
+    while evaluated<len(eval_ids):
+        states, len_states, actions, rewards = [], [], [], []
+        for i in range(batch):
+            id=eval_ids[evaluated]
+            group=groups.get_group(id)
+            history=[]
+            for index, row in group.iterrows():
+                state=list(history)
+                len_states.append(state_size if len(state)>=state_size else 1 if len(state)==0 else len(state))
+                state=pad_history(state,state_size,item_num)
+                states.append(state)
+                action = row['item_id']
+                is_buy = row['is_buy']
+                reward = reward_buy if is_buy == 1 else reward_click
+                if is_buy == 1:
+                    total_purchase += 1.0
+                else:
+                    total_clicks += 1.0
+                actions.append(action)
+                rewards.append(reward)
+                history.append(row['item_id'])
+            evaluated += 1
+        #prediction = grumodel(states.to(device).long(), len_state.to(device).long())
+        #prediction = grumodelsess.run(GRUnet.output, feed_dict={GRUnet.inputs: states, GRUnet.len_state: len_states})
+        sorted_list = np.argsort(prediction)
+        calculate_hit(sorted_list, topk, actions, rewards, reward_click, total_reward,
+                      hit_clicks, ndcg_clicks, hit_purchase, ndcg_purchase)
+    print('#############################################################')
+    print('total clicks: %d, total purchase:%d' % (total_clicks, total_purchase))
+    for i in range(len(topk)):
+        hr_click=hit_clicks[i]/total_clicks
+        hr_purchase=hit_purchase[i]/total_purchase
+        ng_click=ndcg_clicks[i]/total_clicks
+        ng_purchase=ndcg_purchase[i]/total_purchase
+        print('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
+        print('cumulative reward @ %d: %f' % (topk[i],total_reward[i]))
+        print('clicks hr ndcg @ %d : %f, %f' % (topk[i],hr_click,ng_click))
+        print('purchase hr and ndcg @%d : %f, %f' % (topk[i], hr_purchase, ng_purchase))
+    print('#############################################################')
+
+
+def prepare_dataloader(data_directory):
+    replay_buffer = pd.read_pickle(os.path.join(data_directory, 'replay_buffer.df'))
+    replay_buffer_dic = replay_buffer.to_dict()
+    states = replay_buffer_dic['state'].values()
+    states = torch.stack([torch.from_numpy(np.array(i, dtype=np.long)) for i in states]).long()
+    len_states = replay_buffer_dic['len_state'].values()
+    len_states = torch.from_numpy(np.fromiter(len_states, dtype=np.long)).long()
+    targets = replay_buffer_dic['action'].values()
+    targets = torch.from_numpy(np.fromiter(targets, dtype=np.long)).long()
+    train_data = TensorDataset(states, len_states, targets)
+    train_loader = DataLoader(train_data, shuffle=True, batch_size=args.batch_size, drop_last=True)
+    return train_loader
+
+
+def get_stats(data_dir):
+    data_statis = pd.read_pickle(
+        os.path.join(data_directory, 'data_statis.df'))  # read data statistics, includeing state_size and item_num
+    state_size = data_statis['state_size'][0]  # the length of history to define the state
+    item_num = data_statis['item_num'][0]  # total number of items
+    return state_size, item_num
+
+
 if __name__ == '__main__':
     # Network parameters
     args = parse_args()
 
     device = set_device()
     data_directory = args.data
-    data_statis = pd.read_pickle(
-        os.path.join(data_directory, 'data_statis.df'))  # read data statistics, includeing state_size and item_num
-    state_size = data_statis['state_size'][0]  # the length of history to define the state
-    item_num = data_statis['item_num'][0]  # total number of items
-    reward_click = args.r_click
-    reward_buy = args.r_buy
-    topk=[5,10,15,20]
-    # save_file = 'pretrain-GRU/%d' % (hidden_size)
 
-    gruTorch = GRUTorch(hidden_size=args.hidden_factor, item_num=item_num, state_size=state_size, device=device)
+    state_size, item_num = get_stats(data_directory)
+
+    train_loader = prepare_dataloader(data_directory)
+
+    gruTorch = GRUTorch(hidden_size=args.hidden_factor, item_num=item_num,
+                        state_size=state_size, device=device, batch_size=args.batch_size)
     gruTorch.to(device)
     gruTorch.train()
-
-    replay_buffer = pd.read_pickle(os.path.join(data_directory, 'replay_buffer.df'))
-    replay_buffer_dic = replay_buffer.to_dict()
-    state = replay_buffer_dic['state'].values()
-    state = torch.stack([torch.from_numpy(np.array(i, dtype=np.long)) for i in state]).long()
-    len_state = replay_buffer_dic['len_state'].values()
-    len_state = torch.from_numpy(np.fromiter(len_state, dtype=np.long)).long()
-    target = replay_buffer_dic['action'].values()
-    target = torch.from_numpy(np.fromiter(target, dtype=np.long)).long()
-    train_data = TensorDataset(state, len_state, target)
-    train_loader = DataLoader(train_data, shuffle=True, batch_size=args.batch_size, drop_last=True)
+    # save_file = 'pretrain-GRU/%d' % (hidden_size)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(gruTorch.parameters(), lr=args.lr)
@@ -155,7 +204,6 @@ if __name__ == '__main__':
     total_step = 0
     for epoch in range(args.epoch):
         start_time = time.clock()
-
         avg_loss = 0.
         counter = 0
         for state, len_state, target in train_loader:
@@ -164,12 +212,15 @@ if __name__ == '__main__':
 
             out = gruTorch(state.to(device).long(), len_state.to(device).long())
             loss = criterion(out, target.to(device).long())
+
+            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             avg_loss += loss.item()
 
             total_step += 1
             if total_step % 200 == 0:
+                #evaluate(gruTorch, data_directory, args)
                 print("the loss in %dth batch is: %f" % (total_step, loss.item()))
                 print("Epoch {}......Step: {}/{}....... Average Loss for Epoch: {}".format(epoch, counter,
                                                                                            len(train_loader),
