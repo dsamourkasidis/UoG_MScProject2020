@@ -79,7 +79,7 @@ class GRUTorch(nn.Module):
 
         # ---------------------
         # 3. prepare to run through linear layer
-        self.hidden = self.hidden.contiguous()
+        #self.hidden = self.hidden.contiguous()
         self.hidden = self.hidden.view(-1, self.hidden.shape[2])
 
         # 4. run through actual linear layer
@@ -203,7 +203,7 @@ if __name__ == '__main__':
     epoch_times = []
     total_step = 0
     for epoch in range(args.epoch):
-        start_time = time.clock()
+        start_time = time.time()
         avg_loss = 0.
         counter = 0
         for state, len_state, target in train_loader:
@@ -227,7 +227,7 @@ if __name__ == '__main__':
                                                                                            avg_loss / counter))
             #if total_step % 2000 == 0:
                 #evaluate(sess)
-        current_time = time.clock()
+        current_time = time.time()
         print("Epoch {}/{} Done, Total Loss: {}".format(epoch, args.epoch, avg_loss / len(train_loader)))
         print("Total Time Elapsed: {} seconds".format(str(current_time - start_time)))
         epoch_times.append(current_time - start_time)
