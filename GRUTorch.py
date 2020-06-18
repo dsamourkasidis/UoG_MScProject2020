@@ -257,6 +257,7 @@ if __name__ == '__main__':
                                                                           loss.item()))
             if total_step % 2000 == 0:
                 evaluate(gruTorch, data_directory, args)
+                gruTorch.train()
                 is_best = loss.item() < min_loss
                 min_loss = min(min_loss, loss.item())
                 save_checkpoint({
