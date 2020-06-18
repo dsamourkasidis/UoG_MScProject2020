@@ -2,7 +2,6 @@ import os
 import numpy as np
 import pandas as pd
 from collections import deque
-import tensorflow as tf
 
 def to_pickled_df(data_directory, **kwargs):
     for name, df in kwargs.items():
