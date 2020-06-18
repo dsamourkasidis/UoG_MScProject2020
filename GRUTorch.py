@@ -75,7 +75,7 @@ class GRUTorch(nn.Module):
         x, self.hidden = self.gru(x, self.hidden)
 
         # undo the packing operation
-        x, _ = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
+        #x, _ = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
 
         # ---------------------
         # 3. prepare to run through linear layer
