@@ -39,14 +39,21 @@ class Evaluator(ABC):
         self.state_size = state_size
         self.item_num = item_num
 
-    def evaluate(self, model):
+    def get_batchsize(self, eval_ids):
+        for i in range(100, 200):
+            if len(eval_ids) % i == 0:
+                return i
+        return 0
+
+    def evaluate(self, model, val_or_test):
         topk = [5, 10, 15, 20]
         reward_click = self.args.r_click
         reward_buy = self.args.r_buy
-        eval_sessions = pd.read_pickle(os.path.join(self.data_directory, 'sampled_val.df'))
+        eval_sessions = pd.read_pickle(os.path.join(self.data_directory,
+                                                    'sampled_' + val_or_test + '.df'))
         eval_ids = eval_sessions.session_id.unique()
         groups = eval_sessions.groupby('session_id')
-        batch = 100
+        batch = self.get_batchsize(eval_ids)
         evaluated = 0
         total_clicks = 0.0
         total_purchase = 0.0
@@ -55,47 +62,51 @@ class Evaluator(ABC):
         ndcg_clicks = [0, 0, 0, 0]
         hit_purchase = [0, 0, 0, 0]
         ndcg_purchase = [0, 0, 0, 0]
-        model.eval()
-        while evaluated < len(eval_ids):
-            states, len_states, actions, rewards = [], [], [], []
-            for i in range(batch):
-                id = eval_ids[evaluated]
-                group = groups.get_group(id)
-                history = []
-                for index, row in group.iterrows():
-                    state = list(history)
-                    len_states.append(self.state_size if len(state) >= self.state_size else 1 if len(state) == 0 else len(state))
-                    state = pad_history(state, self.state_size, self.item_num)
-                    states.append(state)
-                    action = row['item_id']
-                    is_buy = row['is_buy']
-                    reward = reward_buy if is_buy == 1 else reward_click
-                    if is_buy == 1:
-                        total_purchase += 1.0
-                    else:
-                        total_clicks += 1.0
-                    actions.append(action)
-                    rewards.append(reward)
-                    history.append(row['item_id'])
-                evaluated += 1
-            states = torch.stack([torch.from_numpy(np.array(i, dtype=np.long)) for i in states]).long()
-            len_states = torch.from_numpy(np.fromiter(len_states, dtype=np.long)).long()
-            prediction = self.get_prediction(model, states, len_states, self.device)
-            sorted_list = np.argsort(prediction.tolist())
-            calculate_hit(sorted_list, topk, actions, rewards, reward_click, total_reward,
-                          hit_clicks, ndcg_clicks, hit_purchase, ndcg_purchase)
-        print('#############################################################')
-        print('total clicks: %d, total purchases:%d' % (total_clicks, total_purchase))
-        for i in range(len(topk)):
-            hr_click = hit_clicks[i] / total_clicks
-            hr_purchase = hit_purchase[i] / total_purchase
-            ng_click = ndcg_clicks[i] / total_clicks
-            ng_purchase = ndcg_purchase[i] / total_purchase
-            print('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
-            print('cumulative reward @ %d: %f' % (topk[i], total_reward[i]))
-            print('clicks hr ndcg @ %d : %f, %f' % (topk[i], hr_click, ng_click))
-            print('purchase hr and ndcg @%d : %f, %f' % (topk[i], hr_purchase, ng_purchase))
-        print('#############################################################')
+        with torch.no_grad():
+            model.eval()
+            while evaluated < len(eval_ids):
+                states, len_states, actions, rewards = [], [], [], []
+                for i in range(batch):
+                    id = eval_ids[evaluated]
+                    group = groups.get_group(id)
+                    history = []
+                    for index, row in group.iterrows():
+                        state = list(history)
+                        len_states.append(self.state_size if len(state) >= self.state_size else 1 if len(state) == 0 else len(state))
+                        state = pad_history(state, self.state_size, self.item_num)
+                        states.append(state)
+                        action = row['item_id']
+                        is_buy = row['is_buy']
+                        reward = reward_buy if is_buy == 1 else reward_click
+                        if is_buy == 1:
+                            total_purchase += 1.0
+                        else:
+                            total_clicks += 1.0
+                        actions.append(action)
+                        rewards.append(reward)
+                        history.append(row['item_id'])
+                    evaluated += 1
+                states = torch.stack([torch.from_numpy(np.array(i, dtype=np.long)) for i in states]).long()
+                len_states = torch.from_numpy(np.fromiter(len_states, dtype=np.long)).long()
+                prediction = self.get_prediction(model, states, len_states, self.device)
+                del states
+                del len_states
+                torch.cuda.empty_cache()
+                sorted_list = np.argsort(prediction.tolist())
+                calculate_hit(sorted_list, topk, actions, rewards, reward_click, total_reward,
+                              hit_clicks, ndcg_clicks, hit_purchase, ndcg_purchase)
+            print('#############################################################')
+            print('total clicks: %d, total purchases:%d' % (total_clicks, total_purchase))
+            for i in range(len(topk)):
+                hr_click = hit_clicks[i] / total_clicks
+                hr_purchase = hit_purchase[i] / total_purchase
+                ng_click = ndcg_clicks[i] / total_clicks
+                ng_purchase = ndcg_purchase[i] / total_purchase
+                print('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
+                print('cumulative reward @ %d: %f' % (topk[i], total_reward[i]))
+                print('clicks hr ndcg @ %d : %f, %f' % (topk[i], hr_click, ng_click))
+                print('purchase hr and ndcg @%d : %f, %f' % (topk[i], hr_purchase, ng_purchase))
+            print('#############################################################')
 
 
     @abstractmethod
@@ -201,8 +212,8 @@ class Trainer(ABC):
                     print("Epoch {}......Batch: {}/{}....... Loss: {}".format(epoch, counter,
                                                                               len(train_loader),
                                                                               loss.item()))
-                if total_step % 200 == 0:
-                    evaluator.evaluate(self.model)
+                if total_step % 2000 == 0:
+                    evaluator.evaluate(self.model, 'val')
                     self.model.train()
                     is_best = loss.item() < min_loss
                     min_loss = min(min_loss, loss.item())

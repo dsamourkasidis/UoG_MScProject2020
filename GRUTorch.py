@@ -13,9 +13,11 @@ import train_eval
 def parse_args():
     parser = argparse.ArgumentParser(description="Run supervised GRU.")
 
+    parser.add_argument('--mode', default='train',
+                        help='Train or test the model. "train" or "test"')
     parser.add_argument('--epochs', type=int, default=30,
                         help='Number of max epochs.')
-    parser.add_argument('--data', nargs='?', default='data/RetailRocket',
+    parser.add_argument('--data', nargs='?', default='data/RC15',
                         help='data directory')
     parser.add_argument('--resume', type=int, default=1,
                         help='flag for resume. 1: resume training; 0: train from start')
@@ -27,7 +29,7 @@ def parse_args():
                         help='reward for the click behavior.')
     parser.add_argument('--r_buy', type=float, default=1.0,
                         help='reward for the purchase behavior.')
-    parser.add_argument('--lr', type=float, default=0.005,
+    parser.add_argument('--lr', type=float, default=0.01,
                         help='Learning rate.')
     return parser.parse_args()
 
@@ -38,7 +40,7 @@ class GRUTorch(nn.Module):
         self.device = device
         self.hidden_size = hidden_size
         self.item_embeddings = nn.Embedding(
-            num_embeddings=item_num,
+            num_embeddings=item_num+1,
             embedding_dim=self.hidden_size,
             # padding_idx=padding_idx
         )
@@ -118,6 +120,27 @@ class GRUTrainer(train_eval.Trainer):
         return criterion
 
 
+TRAIN = 'train'
+TEST = 'test'
+
+
+def train_model(args, device, state_size, item_num):
+    gru_trainer = GRUTrainer('gru', args, device, state_size, item_num)
+    gru_trainer.train(train_loader)
+
+
+def test_model(device, args, data_directory, state_size, item_num):
+    gruTorch = GRUTorch(hidden_size=args.hidden_factor, item_num=item_num,
+                        state_size=state_size, device=device)
+    checkpoint_handler = train_eval.CheckpointHandler('gru', device)
+    optimizer = torch.optim.Adam(gruTorch.parameters(), lr=args.lr)
+    _, _ = checkpoint_handler.load_from_checkpoint(True, gruTorch, optimizer)
+    gruTorch.to(device)
+
+    gru_evaluator = GRUEvaluator(device, args, data_directory, state_size, item_num)
+    gru_evaluator.evaluate(gruTorch, 'test')
+
+
 if __name__ == '__main__':
     # Network parameters
     args = parse_args()
@@ -127,6 +150,9 @@ if __name__ == '__main__':
     state_size, item_num = train_eval.get_stats(data_directory)
     train_loader = train_eval.prepare_dataloader(data_directory, args.batch_size)
 
-    gru_trainer = GRUTrainer('gru', args, device, state_size, item_num)
-    gru_trainer.train(train_loader)
+    if args.mode.lower() == TRAIN:
+        train_model(args, device, state_size, item_num)
+    else:
+        test_model(device, args, data_directory, state_size, item_num)
+
 
