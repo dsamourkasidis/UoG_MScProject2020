@@ -39,12 +39,6 @@ class Evaluator(ABC):
         self.state_size = state_size
         self.item_num = item_num
 
-    def get_batchsize(self, eval_ids):
-        for i in range(100, 200):
-            if len(eval_ids) % i == 0:
-                return i
-        return 0
-
     def evaluate(self, model, val_or_test):
         topk = [5, 10, 15, 20]
         reward_click = self.args.r_click
@@ -53,7 +47,6 @@ class Evaluator(ABC):
                                                     'sampled_' + val_or_test + '.df'))
         eval_ids = eval_sessions.session_id.unique()
         groups = eval_sessions.groupby('session_id')
-        batch = self.get_batchsize(eval_ids)
         evaluated = 0
         total_clicks = 0.0
         total_purchase = 0.0
@@ -66,6 +59,7 @@ class Evaluator(ABC):
             model.eval()
             while evaluated < len(eval_ids):
                 states, len_states, actions, rewards = [], [], [], []
+                batch = 100 if (len(eval_ids) - evaluated) > 100 else (len(eval_ids) - evaluated)
                 for i in range(batch):
                     id = eval_ids[evaluated]
                     group = groups.get_group(id)

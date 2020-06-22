@@ -125,14 +125,14 @@ TEST = 'test'
 
 
 def train_model(args, device, state_size, item_num):
-    gru_trainer = GRUTrainer('gru', args, device, state_size, item_num)
+    gru_trainer = GRUTrainer('gru_RC15', args, device, state_size, item_num)
     gru_trainer.train(train_loader)
 
 
 def test_model(device, args, data_directory, state_size, item_num):
     gruTorch = GRUTorch(hidden_size=args.hidden_factor, item_num=item_num,
                         state_size=state_size, device=device)
-    checkpoint_handler = train_eval.CheckpointHandler('gru', device)
+    checkpoint_handler = train_eval.CheckpointHandler('gru_RC15', device)
     optimizer = torch.optim.Adam(gruTorch.parameters(), lr=args.lr)
     _, _ = checkpoint_handler.load_from_checkpoint(True, gruTorch, optimizer)
     gruTorch.to(device)
