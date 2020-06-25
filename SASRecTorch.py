@@ -91,7 +91,8 @@ class SASRecTorch(nn.Module):
             
         x = normalize(x)
         out = extract_axis_1(x,inputs_lengths-1)
-        out = nn.Linear(out,self.item_num)
+        fc1 = nn.Linear(out.size(-1),self.item_num)
+        out = fc1(out)
             
         return out
             
