@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 #/usr/bin/python2
 '''
-Tensorflow Model by
 June 2017 by kyubyong park. 
 kbpark.linguist@gmail.com.
 https://www.github.com/kyubyong/transformer
@@ -153,7 +152,7 @@ def multihead_attention(queries,
     outputs = torch.matmul(Q_, K.permute(0, 2, 1)) # (h*N, T_q, T_k)
         
     # Scale
-    outputs = outputs / (K_.get_shape().as_list()[-1] ** 0.5)
+    outputs = outputs / (K_.size(-1) ** 0.5)
         
     # Key Masking
     key_masks = torch.sign(torch.abs(torch.sum(keys,-1))) # (N, T_k)
@@ -173,7 +172,8 @@ def multihead_attention(queries,
         outputs = torch.where(torch.eq(masks, 0), paddings, outputs) # (h*N, T_q, T_k)
   
     # Activation
-    outputs = nn.Softmax(outputs) # (h*N, T_q, T_k)
+    softmax = nn.Softmax(dim=-1)
+    outputs = softmax(outputs) # (h*N, T_q, T_k)
          
     # Query Masking
     query_masks = torch.sign(torch.abs(torch.sum(queries,-1))) # (N, T_q)
@@ -189,7 +189,7 @@ def multihead_attention(queries,
     outputs = torch.matmul(outputs, V_) # ( h*N, T_q, C/h)
         
     # Restore shape
-    o_split = outputs.size(0)/num_heads
+    o_split = int(outputs.size(0)/num_heads)
     outputs = torch.cat(torch.split(outputs, o_split, dim=0), dim=2 ) # (N, T_q, C)
               
     # Residual connection
@@ -222,8 +222,8 @@ class feedforward(nn.Module):
     return outputs"""
     def __init__(self, num_units=[2048, 512], dropout_rate=0.2):
         super(feedforward,self).__init__()
-        self.inner_cnn = nn.Conv1d(1,num_units[0],1)
-        self.readout_cnn = nn.Conv1d(num_units[0],num_units[1],1)
+        self.inner_cnn = nn.Conv1d(10,num_units[0],1)
+        self.readout_cnn = nn.Conv1d(num_units[0],10,1)
         self.dropout = nn.Dropout(dropout_rate)
         
     def forward (self,inputs):
