@@ -91,16 +91,20 @@ class Evaluator(ABC):
                               hit_clicks, ndcg_clicks, hit_purchase, ndcg_purchase)
             print('#############################################################')
             print('total clicks: %d, total purchases:%d' % (total_clicks, total_purchase))
+            val_acc = 0
             for i in range(len(topk)):
                 hr_click = hit_clicks[i] / total_clicks
                 hr_purchase = hit_purchase[i] / total_purchase
                 ng_click = ndcg_clicks[i] / total_clicks
                 ng_purchase = ndcg_purchase[i] / total_purchase
+                val_acc = val_acc + hr_click + hr_purchase + ng_click + ng_purchase
                 print('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
                 print('cumulative reward @ %d: %f' % (topk[i], total_reward[i]))
                 print('clicks hr ndcg @ %d : %f, %f' % (topk[i], hr_click, ng_click))
                 print('purchase hr and ndcg @%d : %f, %f' % (topk[i], hr_purchase, ng_purchase))
             print('#############################################################')
+            if val_or_test == "val":
+                return val_acc
 
 
     @abstractmethod
@@ -126,7 +130,7 @@ class CheckpointHandler:
             print("=> loading checkpoint")
             checkpoint = torch.load(self.best_checkpoint)
             start_epoch = checkpoint['epoch']
-            min_loss = checkpoint['min_loss']
+            max_acc = checkpoint['max_acc']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
 
@@ -138,8 +142,8 @@ class CheckpointHandler:
         else:
             print('no checkpoint at {}'.format(self.best_checkpoint))
             start_epoch = 0
-            min_loss = 1000
-        return start_epoch, min_loss
+            max_acc = 0
+        return start_epoch, max_acc
 
 
 class Trainer(ABC):
@@ -175,7 +179,7 @@ class Trainer(ABC):
     def train(self, train_loader):
 
         checkpoint_handler = CheckpointHandler(self.model_name, self.device)
-        start_epoch, min_loss = checkpoint_handler.load_from_checkpoint(self.args.resume, self.model, self.optimizer)
+        start_epoch, max_acc = checkpoint_handler.load_from_checkpoint(self.args.resume, self.model, self.optimizer)
         self.model.to(self.device)
 
         evaluator = self.get_evaluator(self.device, self.args, self.args.data, self.state_size, self.item_num)
@@ -207,14 +211,14 @@ class Trainer(ABC):
                                                                               len(train_loader),
                                                                               loss.item()))
                 if total_step % 2000 == 0:
-                    evaluator.evaluate(self.model, 'val')
+                    val_acc = evaluator.evaluate(self.model, 'val')
                     self.model.train()
-                    is_best = loss.item() < min_loss
-                    min_loss = min(min_loss, loss.item())
+                    is_best = val_acc > max_acc
+                    max_acc = max(max_acc, val_acc)
                     checkpoint_handler.save_checkpoint({
                         'epoch': epoch + 1,
                         'state_dict': self.model.state_dict(),
-                        'min_loss': min_loss,
+                        'max_acc': max_acc,
                         'optimizer': self.optimizer.state_dict(),
                     }, is_best)
             current_time = time.clock()
