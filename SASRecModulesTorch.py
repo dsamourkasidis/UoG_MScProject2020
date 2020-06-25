@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 #/usr/bin/python2
 '''
+Tensorflow Model by
 June 2017 by kyubyong park. 
 kbpark.linguist@gmail.com.
 https://www.github.com/kyubyong/transformer
@@ -134,20 +135,22 @@ def multihead_attention(queries,
     if num_units is None:
         num_units = queries.size().as_list[-1]
     # Linear projections
-    Q = nn.Linear(queries, num_units) # (N, T_q, C)
-    K = nn.Linear(keys, num_units) # (N, T_k, C)
-    V = nn.Linear(keys, num_units) # (N, T_k, C)
+    m1 = nn.Linear(queries.size(-1),num_units)
+    m2 = nn.Linear(keys.size(-1),num_units)
+    Q = m1(queries) # (N, T_q, C)
+    K = m2(keys) # (N, T_k, C)
+    V = m2(keys) # (N, T_k, C)
     
     # Split and concat
-    q_split = Q.size(2)/num_heads
-    k_split = K.size(2)/num_heads
-    v_split = V.size(2)/num_heads
+    q_split = int(Q.size(2)/num_heads)
+    k_split = int(K.size(2)/num_heads)
+    v_split = int(V.size(2)/num_heads)
     Q_ = torch.cat(torch.split(Q, q_split, dim=2), dim=0) # (h*N, T_q, C/h) 
     K_ = torch.cat(torch.split(K, k_split, dim=2), dim=0) # (h*N, T_k, C/h) 
     V_ = torch.cat(torch.split(V, v_split, dim=2), dim=0) # (h*N, T_k, C/h) 
 
     # Multiplication
-    outputs = torch.matmul(Q_, K.permute[0, 2, 1]) # (h*N, T_q, T_k)
+    outputs = torch.matmul(Q_, K.permute(0, 2, 1)) # (h*N, T_q, T_k)
         
     # Scale
     outputs = outputs / (K_.get_shape().as_list()[-1] ** 0.5)
