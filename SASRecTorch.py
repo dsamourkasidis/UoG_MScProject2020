@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import argparse
-from utility_torch import extract_axis_1, normalize, set_device
+from utility_torch import extract_axis_1_torch, normalize, set_device
 from SASRecModulesTorch import multihead_attention,feedforward
 import train_eval
 
@@ -35,6 +35,7 @@ def parse_args():
 
 class SASRecTorch(nn.Module):
     def __init__(self, hidden_size,item_num,state_size,device,num_blocks,num_heads,dropout_rate):
+        super(SASRecTorch, self).__init__()
         self.hidden_size = hidden_size
         self.item_num = int(item_num)
         self.state_size = state_size
@@ -59,13 +60,14 @@ class SASRecTorch(nn.Module):
         #x`self.multihead_attention = multihead_attention()
         
         #Feedforward Layer
-        self.feedforward = feedforward()
+        self.feedforward = feedforward(num_units=[self.hidden_size,self.hidden_size],
+                                     dropout_rate=self.dropout_rate)
         
         #dropout
         self.dropout = nn.Dropout(self.dropout_rate)
         
         #Fully connected Layer
-        #self.fc1 = nn.Linear()
+        self.fc1 = nn.Linear(self.hidden_size,self.item_num)
         
     def forward(self, inputs, inputs_lengths):
         input_emb = self.item_embeddings(inputs)
@@ -85,15 +87,12 @@ class SASRecTorch(nn.Module):
                                              num_heads=self.num_heads,
                                              dropout_rate=self.dropout_rate,
                                              causality=True)
-        x = self.feedforward(normalize(x),num_units=[self.hidden_size,self.hidden_size],
-                                     dropout_rate=self.dropout_rate)
+        x = self.feedforward(normalize(x))
         x *= mask
             
         x = normalize(x)
-        out = extract_axis_1(x,inputs_lengths-1)
-        fc1 = nn.Linear(out.size(-1),self.item_num)
-        out = fc1(out)
-            
+        out = extract_axis_1_torch(x,inputs_lengths-1)
+        out = self.fc1(out)
         return out
             
                 
