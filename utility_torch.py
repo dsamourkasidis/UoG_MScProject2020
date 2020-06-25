@@ -23,21 +23,13 @@ def torch_gather_nd(params,indices):
     on the page, implementing tf.gather_nd in pytorch
     https://discuss.pytorch.org/t/implement-tf-gather-nd-in-pytorch/37502
     """
-    max_value = functools.reduce(operator.mul, list(params.size())) - 1
-    indices = indices.t().long()
-    ndim = indices.size(0)
-    idx = torch.zeros_like(indices[0]).long()
-    m = 1
-    
-    for i in range(ndim)[::-1]:
-        idx += indices[i] * m 
-        m *= params.size(i)
+    x = []
+    for i in range(len(indices)):
+        x.append(params[i,indices[i][-1],:].tolist())
+    x = torch.Tensor(x)
+    return x
 
-    idx[idx < 0] = 0
-    idx[idx > max_value] = 0
-    return torch.take(params, idx)
-
-def extract_axis_1(data, ind):
+def extract_axis_1_torch(data, ind):
     """
     Get specified elements along the first axis of tensor.
     :param data: Tensorflow tensor that will be subsetted.
@@ -45,12 +37,13 @@ def extract_axis_1(data, ind):
     :return: Subsetted tensor.
     """
 
-    batch_range = torch.range(data.size(0))
+    batch_range = torch.range(start = 0, end = data.size(0)-1)
+    batch_range = batch_range.long()
+    ind = ind.long()
     indices = torch.stack([batch_range, ind], dim=1)
     res = torch_gather_nd(data, indices)
 
     return res
-
 
 def normalize(inputs,epsilon=1e-8):
     '''Applies layer normalization.
@@ -97,12 +90,12 @@ def calculate_hit(sorted_list,topk,true_items,rewards,r_click,total_reward,hit_c
                     ndcg_purchase[i] += 1.0 / np.log2(rank + 1)
 
 def set_device():
-    """#is_cuda = torch.cuda.is_available()
+    is_cuda = torch.cuda.is_available()
 
     # If we have a GPU available, we'll set our device to GPU. We'll use this device variable later in our code.
-    #if is_cuda:
+    if is_cuda:
         device = torch.device("cuda")
-    else"""
-    device = torch.device("cpu")
+    else:
+        device = torch.device("cpu")
     return device
 
