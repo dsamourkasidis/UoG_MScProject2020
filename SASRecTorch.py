@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import argparse
-from utility_torch import extract_axis_1_torch, normalize, set_device
+from utility import extract_axis_1_torch, normalize, set_device
 from SASRecModulesTorch import multihead_attention,feedforward
 import train_eval
 

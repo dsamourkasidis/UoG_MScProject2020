@@ -2,9 +2,11 @@ import os
 import numpy as np
 import torch
 
+
 def to_pickled_df(data_directory, **kwargs):
     for name, df in kwargs.items():
         df.to_pickle(os.path.join(data_directory, name + '.df'))
+
 
 def pad_history(itemlist,length,pad_item):
     if len(itemlist)>=length:
@@ -13,6 +15,67 @@ def pad_history(itemlist,length,pad_item):
         temp = [pad_item] * (length-len(itemlist))
         itemlist.extend(temp)
         return itemlist
+
+
+def torch_gather_nd(params,indices):
+    """
+    This function is taken from Haozhe Xie's reply
+    on the page, implementing tf.gather_nd in pytorch
+    https://discuss.pytorch.org/t/implement-tf-gather-nd-in-pytorch/37502
+    """
+    x = []
+    for i in range(len(indices)):
+        x.append(params[i,indices[i][-1],:].tolist())
+    x = torch.Tensor(x)
+    return x
+
+
+def extract_axis_1_torch(data, ind):
+    """
+    Get specified elements along the first axis of tensor.
+    :param data: Tensorflow tensor that will be subsetted.
+    :param ind: Indices to take (one for each element along axis 0 of data).
+    :return: Subsetted tensor.
+    """
+
+    batch_range = torch.range(start = 0, end = data.size(0)-1)
+    batch_range = batch_range.long()
+    ind = ind.long()
+    indices = torch.stack([batch_range, ind], dim=1)
+    res = torch_gather_nd(data, indices)
+
+    return res
+
+
+def normalize(inputs,epsilon=1e-8):
+    '''Applies layer normalization.
+
+    Args:
+      inputs: A tensor with 2 or more dimensions, where the first dimension has
+        `batch_size`.
+      epsilon: A floating number. A very small number for preventing ZeroDivision Error.
+      scope: Optional scope for `variable_scope`.
+      reuse: Boolean, whether to reuse the weights of a previous layer
+        by the same name.
+
+    Returns:
+      A tensor with the same shape and data dtype as `inputs`.
+    '''
+    inputs_shape = inputs.size()
+    #print (inputs_shape)
+    params_shape = inputs_shape[-1:]
+
+    mean = inputs.mean(dim=-1,keepdim=True)
+    #print (mean.size())
+    variance = inputs.var(dim=-1,keepdim=True)
+    beta = torch.zeros(params_shape)
+    gamma = torch.ones(params_shape)
+    num = inputs-mean
+    deno = variance+epsilon
+    normalized = (num) / ((deno) ** (.5))
+    outputs = gamma * normalized + beta
+
+    return outputs
 
 
 def calculate_hit(sorted_list,topk,true_items,rewards,r_click,total_reward,hit_click,ndcg_click,hit_purchase,ndcg_purchase):
@@ -40,30 +103,3 @@ def set_device():
         device = torch.device("cpu")
     return device
 
-
-def extract_axis_1(data, ind, device):
-    """
-    Get specified elements along the first axis of tensor.
-    :param data: Tensorflow tensor that will be subsetted.
-    :param ind: Indices to take (one for each element along axis 0 of data).
-    :return: Subsetted tensor.
-    """
-
-    batch_range = torch.arange(0, data.shape[0], dtype=torch.int64).to(device)
-    indices = torch.stack([batch_range, ind], dim=1)
-    #res = data.index_select(0, indices)
-    res = data[indices.transpose(0,1).tolist()]
-    return res
-
-# class Memory():
-#     def __init__(self):
-#         self.buffer = deque()
-#
-#     def add(self, experience):
-#         self.buffer.append(experience)
-#
-#     def sample(self, batch_size):
-#         idx = np.random.choice(np.arange(len(self.buffer)),
-#                                size=batch_size,
-#                                replace=False)
-#         return [self.buffer[ii] for ii in idx]

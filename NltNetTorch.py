@@ -67,10 +67,22 @@ class NltNetTorch(nn.Module):
             dilate_output = dilated(dilate_output)
             dilate_output *= mask
 
-        state_hidden = extract_axis_1(dilate_output, inputs_lengths - 1, self.device)
+        state_hidden = self.extract_unpadded(dilate_output, inputs_lengths - 1)
 
         output = self.fc(state_hidden)
         return output
+
+    def extract_unpadded(self, data, ind):
+        """
+        Get true elements from each sequence (not padded)
+        :param data: Tensorflow tensor that will be subsetted.
+        :param ind: Indices to take (one for each element along axis 0 of data).
+        :return: Subsetted tensor.
+        """
+        batch_range = torch.arange(0, data.shape[0], dtype=torch.int64).to(self.device)
+        indices = torch.stack([batch_range, ind], dim=1)
+        res = data[indices.transpose(0, 1).tolist()]
+        return res
 
 
 
