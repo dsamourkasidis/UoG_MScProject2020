@@ -41,6 +41,20 @@ def set_device():
     return device
 
 
+def extract_axis_1(data, ind, device):
+    """
+    Get specified elements along the first axis of tensor.
+    :param data: Tensorflow tensor that will be subsetted.
+    :param ind: Indices to take (one for each element along axis 0 of data).
+    :return: Subsetted tensor.
+    """
+
+    batch_range = torch.arange(0, data.shape[0], dtype=torch.int64).to(device)
+    indices = torch.stack([batch_range, ind], dim=1)
+    #res = data.index_select(0, indices)
+    res = data[indices.transpose(0,1).tolist()]
+    return res
+
 # class Memory():
 #     def __init__(self):
 #         self.buffer = deque()
