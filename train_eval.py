@@ -147,12 +147,13 @@ class CheckpointHandler:
 
 
 class Trainer(ABC):
-    def __init__(self, model_name, args, device, state_size, item_num):
+    def __init__(self, model_name, args, device, state_size, item_num, evaluation_steps=2000):
         self.args = args
         self.device = device
         self.model_name = model_name
         self.state_size = state_size
         self.item_num = item_num
+        self.evaluation_steps = evaluation_steps
         self.model = self.create_model()
         self.optimizer = self.create_optimizer()
 
@@ -210,7 +211,7 @@ class Trainer(ABC):
                     print("Epoch {}......Batch: {}/{}....... Loss: {}".format(epoch, counter,
                                                                               len(train_loader),
                                                                               loss.item()))
-                if total_step % 2000 == 0:
+                if total_step % self.evaluation_steps == 0:
                     val_acc = evaluator.evaluate(self.model, 'val')
                     self.model.train()
                     is_best = val_acc > max_acc
