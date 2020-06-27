@@ -57,7 +57,9 @@ class SASRecTorch(nn.Module):
         nn.init.normal_(self.pos_embeddings.weight, 0, 0.01)
         
         #Multihead Attention Layer
-        #x`self.multihead_attention = multihead_attention()
+        self.multihead_attention = multihead_attention(num_units=self.hidden_size,
+                                    num_heads=self.num_heads,dropout_rate=self.dropout_rate,
+                                    causality=True,with_qk=False,hidden_size=self.hidden_size)
         
         #Feedforward Layer
         self.feedforward = feedforward(num_units=[self.hidden_size,self.hidden_size],
@@ -71,7 +73,7 @@ class SASRecTorch(nn.Module):
         
     def forward(self, inputs, inputs_lengths):
         input_emb = self.item_embeddings(inputs)
-        pos_emb_input = torch.cat(inputs.size(0)*[torch.range(start=0,end=inputs.size(1)-1).unsqueeze(0)])
+        pos_emb_input = torch.cat(inputs.size(0)*[torch.arange(start=0,end=inputs.size(1)).unsqueeze(0)])
         pos_emb_input = pos_emb_input.long()
         pos_emb = self.pos_embeddings(pos_emb_input)
         x = input_emb+pos_emb
@@ -82,11 +84,7 @@ class SASRecTorch(nn.Module):
         x *= mask
             
         for i in range (self.num_blocks):
-            x = multihead_attention(queries=normalize(x),keys=x,
-                                             num_units=self.hidden_size,
-                                             num_heads=self.num_heads,
-                                             dropout_rate=self.dropout_rate,
-                                             causality=True)
+            x = self.multihead_attention(queries=normalize(x),keys=x)
         x = self.feedforward(normalize(x))
         x *= mask
             
