@@ -57,6 +57,7 @@ class Evaluator(ABC):
         ndcg_purchase = [0, 0, 0, 0]
         with torch.no_grad():
             model.eval()
+            print('Evaluation started...')
             while evaluated < len(eval_ids):
                 states, len_states, actions, rewards = [], [], [], []
                 batch = 100 if (len(eval_ids) - evaluated) > 100 else (len(eval_ids) - evaluated)
@@ -89,6 +90,8 @@ class Evaluator(ABC):
                 sorted_list = np.argsort(prediction.tolist())
                 calculate_hit(sorted_list, topk, actions, rewards, reward_click, total_reward,
                               hit_clicks, ndcg_clicks, hit_purchase, ndcg_purchase)
+                if evaluated % (5*batch) == 0:
+                    print("Evaluated: {}/{}....... ".format(evaluated, len(eval_ids)))
             print('#############################################################')
             print('total clicks: %d, total purchases:%d' % (total_clicks, total_purchase))
             val_acc = 0

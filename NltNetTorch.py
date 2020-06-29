@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import argparse
-from utility import pad_history, calculate_hit, set_device
+from utility import set_device
 import train_eval
 
 
