@@ -215,6 +215,7 @@ class Trainer(ABC):
                                                                               len(train_loader),
                                                                               loss.item()))
                 if total_step % self.evaluation_steps == 0:
+                    print("Time Elapsed: {} seconds".format(str(time.clock() - start_time)))
                     val_acc = evaluator.evaluate(self.model, 'val')
                     self.model.train()
                     is_best = val_acc > max_acc

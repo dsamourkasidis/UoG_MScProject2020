@@ -3,16 +3,17 @@ import torch.nn as nn
 import argparse
 from utility import set_device
 import train_eval
-
+import CpRec.residual_block as res_blk
+import CpRec.BlockWiseEmbedding as block_emb
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run supervised GRU.")
 
-    parser.add_argument('--mode', default='train',
+    parser.add_argument('--mode', default='test',
                         help='Train or test the model. "train" or "test"')
     parser.add_argument('--epochs', type=int, default=30,
                         help='Number of max epochs.')
-    parser.add_argument('--data', nargs='?', default='data/RetailRocket',
+    parser.add_argument('--data', nargs='?', default='../data/RC15',
                         help='data directory')
     parser.add_argument('--resume', type=int, default=1,
                         help='flag for resume. 1: resume training; 0: train from start')
@@ -29,30 +30,44 @@ def parse_args():
     return parser.parse_args()
 
 
-class NltNetTorch(nn.Module):
-    def __init__(self, hidden_size, item_num, state_size, device, gru_layers=1):
-        super(NltNetTorch, self).__init__()
+class CpNltNet(nn.Module):
+    def __init__(self, hidden_size, item_num, embedding_param, device):
+        super(CpNltNet, self).__init__()
         self.device = device
         self.hidden_size = hidden_size
         self.item_num = item_num
         self.conv_param = {
             'dilated_channels': 64,  # larger is better until 512 or 1024
-            'dilations': [1, 2, 1, 2, 1, 2, ],  # YOU should tune this hyper-parameter, refer to the paper.
-            'kernel_size': 3,
+            'dilations': [1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2],  # YOU should tune this hyper-parameter, refer to the paper.
+            'kernel_size': 3
         }
+        self.emb_param = embedding_param
 
+        # --------------------
+        # 1. Embeddings
+#        self.item_embeddings = block_emb.BlockWiseEmbeddingForInput(item_num, self.hidden_size, device,
+ #                                                                   self.emb_param['block'], self.emb_param['factor'])
         self.item_embeddings = nn.Embedding(
-            num_embeddings=item_num+1,
+            num_embeddings=item_num + 1,
             embedding_dim=self.hidden_size,
             # padding_idx=padding_idx
         )
         # init embedding
         nn.init.normal_(self.item_embeddings.weight, 0, 0.01)
+        # ---------------------
+        # 2. Residual blocks
+        residual_blocks = []
+        bl = res_blk.CpResidualBlockAdjacentBlock(self.conv_param['dilations'][0], self.hidden_size, self.conv_param['dilated_channels'],
+                                               self.conv_param['kernel_size'], 0, None)
+        residual_blocks.append(bl)
+        for layer_id, dil in enumerate(self.conv_param['dilations'][1:]):
+            bl = res_blk.CpResidualBlockAdjacentBlock(dil, self.hidden_size, self.conv_param['dilated_channels'],
+                                                   self.conv_param['kernel_size'], layer_id+1, bl)
+            residual_blocks.append(bl)
+        self.res_dil_convs = nn.ModuleList(residual_blocks)
 
-        self.res_dil_convs = nn.ModuleList([ResidualBlock(dil,self.hidden_size,self.conv_param['dilated_channels'],
-                                                      self.conv_param['kernel_size'])
-                                        for dil in self.conv_param['dilations']])
-
+        # ---------------------
+        # 3. FC
         self.fc = nn.Linear(self.hidden_size, item_num)
 
     def forward(self, inputs, inputs_lengths):
@@ -85,60 +100,17 @@ class NltNetTorch(nn.Module):
         return res
 
 
-
-class ResidualBlock(nn.Module):
-    def __init__(self, dilation, in_channels, out_channels, kernel_size, causal=True):
-        super(ResidualBlock, self).__init__()
-        self.kernel_size = kernel_size
-        self.dilation = dilation
-        self.conv1 = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(1, kernel_size),
-                               padding=0, dilation=dilation, bias=True)
-        self.layer_norm1 = None
-        self.rel1 = nn.ReLU()
-        self.conv2 = nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=(1, kernel_size),
-                               padding=0, dilation=2*dilation, bias=True)
-        self.layer_norm2 = None
-        self.rel2 = nn.ReLU()
-
-    def forward(self, inputs):
-        padding = [0, 0, (self.kernel_size - 1) * self.dilation, 0, 0, 0]
-        padded = torch.nn.functional.pad(inputs, padding)
-        # pytorch expect BCHW input that is why we permute and add height in dim 2
-        padded = padded.permute(0, 2, 1)
-        input_expanded = padded.unsqueeze(dim=2)
-        y = self.conv1(input_expanded)
-        y = y.squeeze(dim=2)
-        if self.layer_norm1 is None:
-            self.layer_norm1 = nn.LayerNorm(y.shape[1:], elementwise_affine=False)
-        y = self.layer_norm1(y)
-        y = self.rel1(y)
-
-        padding = [(self.kernel_size - 1) * 2*self.dilation, 0, 0, 0, 0, 0]
-        padded = torch.nn.functional.pad(y, padding)
-        padded = padded.unsqueeze(dim=2)
-        y = self.conv2(padded)
-        y = y.squeeze(dim=2)
-        if self.layer_norm2 is None:
-            self.layer_norm2 = nn.LayerNorm(y.shape[1:], elementwise_affine=False)
-        y = self.layer_norm2(y)
-        y = self.rel2(y)
-
-
-        y = y.permute(0, 2, 1)
-        return inputs + y
-
-
-class NltNetEvaluator(train_eval.Evaluator):
+class CpNltNetEvaluator(train_eval.Evaluator):
     def get_prediction(self, model, states, len_states, device):
         prediction = model(states.to(device).long(), len_states.to(device).long())
         return prediction
 
 
-class NltNetTrainer(train_eval.Trainer):
+class CpNltNetTrainer(train_eval.Trainer):
 
     def create_model(self):
-        nltNetTorch = NltNetTorch(hidden_size=self.args.hidden_factor, item_num=self.item_num,
-                            state_size=self.state_size, device=self.device)
+        nltNetTorch = CpNltNet(hidden_size=self.args.hidden_factor, item_num=self.item_num,
+                               embedding_param=emb_param, device=self.device)
         total_params = sum(p.numel() for p in nltNetTorch.parameters() if p.requires_grad)
         print(total_params)
         return nltNetTorch
@@ -148,7 +120,7 @@ class NltNetTrainer(train_eval.Trainer):
         return out
 
     def get_evaluator(self, device, args, data_directory, state_size, item_num):
-        gru_evaluator = NltNetEvaluator(device, args, data_directory, state_size, item_num)
+        gru_evaluator = CpNltNetEvaluator(device, args, data_directory, state_size, item_num)
         return gru_evaluator
 
     def create_optimizer(self):
@@ -165,19 +137,18 @@ TEST = 'test'
 
 
 def train_model(args, device, state_size, item_num):
-    gru_trainer = NltNetTrainer('nltNet_RetailRocket', args, device, state_size, item_num)
+    gru_trainer = CpNltNetTrainer('CpNltNet_512_RC15', args, device, state_size, item_num)
     gru_trainer.train(train_loader)
 
 
 def test_model(device, args, data_directory, state_size, item_num):
-    gruTorch = NltNetTorch(hidden_size=args.hidden_factor, item_num=item_num,
-                        state_size=state_size, device=device)
-    checkpoint_handler = train_eval.CheckpointHandler('nltNet_RC15', device)
+    gruTorch = CpNltNet(hidden_size=args.hidden_factor, item_num=item_num, embedding_param=emb_param, device=device)
+    checkpoint_handler = train_eval.CheckpointHandler('CpNltNet_512_RC15', device)
     optimizer = torch.optim.Adam(gruTorch.parameters(), lr=args.lr)
     _, _ = checkpoint_handler.load_from_checkpoint(True, gruTorch, optimizer)
     gruTorch.to(device)
 
-    gru_evaluator = NltNetEvaluator(device, args, data_directory, state_size, item_num)
+    gru_evaluator = CpNltNetEvaluator(device, args, data_directory, state_size, item_num)
     gru_evaluator.evaluate(gruTorch, 'test')
 
 
@@ -189,6 +160,11 @@ if __name__ == '__main__':
 
     state_size, item_num = train_eval.get_stats(data_directory)
     train_loader = train_eval.prepare_dataloader(data_directory, args.batch_size)
+
+    emb_param = {
+        'block': [5000, 10000, item_num],
+        'factor': 4
+    }
 
     if args.mode.lower() == TRAIN:
         train_model(args, device, state_size, item_num)
