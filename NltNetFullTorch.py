@@ -20,16 +20,12 @@ def parse_args():
                         help='Batch size.')
     parser.add_argument('--hidden_factor', type=int, default=64,
                         help='Number of hidden factors, i.e., embedding size.')
-    parser.add_argument('--r_click', type=float, default=0.2,
-                        help='reward for the click behavior.')
-    parser.add_argument('--r_buy', type=float, default=1.0,
-                        help='reward for the purchase behavior.')
     parser.add_argument('--lr', type=float, default=0.005,
                         help='Learning rate.')
     return parser.parse_args()
 
 
-class NltNetTorch(nn.Module):
+class NltNetFullTorch(nn.Module):
     def __init__(self, hidden_size, item_num, state_size, device, gru_layers=1):
         super(NltNetTorch, self).__init__()
         self.device = device
@@ -55,7 +51,8 @@ class NltNetTorch(nn.Module):
                                                    self.model_params['kernel_size'], layer_id+1))
         self.res_dil_convs = nn.ModuleList(residual_blocks)
 
-        self.fc = nn.Linear(self.hidden_size, item_num)
+        self.fconv = nn.Conv2d(in_channels=self.hidden_size, out_channels=item_num,
+                               kernel_size=1, padding=0, dilation=1, bias=True)
 
     def forward(self, inputs, inputs_lengths):
         # ---------------------
@@ -69,23 +66,10 @@ class NltNetTorch(nn.Module):
             dilate_output = dilated(dilate_output)
             dilate_output *= mask
 
-        state_hidden = self.extract_unpadded(dilate_output, inputs_lengths - 1)
-
-        output = self.fc(state_hidden)
-        return output
-
-    def extract_unpadded(self, data, ind):
-        """
-        Get true elements from each sequence (not padded)
-        :param data: Tensorflow tensor that will be subsetted.
-        :param ind: Indices to take (one for each element along axis 0 of data).
-        :return: Subsetted tensor.
-        """
-        batch_range = torch.arange(0, data.shape[0], dtype=torch.int64).to(self.device)
-        indices = torch.stack([batch_range, ind], dim=1)
-        res = data[indices.transpose(0, 1).tolist()]
-        return res
-
+        conv_output = self.fconv(dilate_output)
+        conv_output = conv_output.squeeze(dim=2)
+        conv_output = conv_output.permute(0, 2, 1)
+        return conv_output
 
 
 class ResidualBlock(nn.Module):
