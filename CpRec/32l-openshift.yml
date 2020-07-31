@@ -39,10 +39,11 @@ spec:
         args:
           - /nfs/2490178/UoG_MScProject2020/CpNltNetFull.py
           - "--data=data/ML100"
-          - "--dilations=1,4,1,4"
-          - "--modelname=CpNltNetFull_ML100_8l_512e_r4"
+          - "--dilations=1,4,1,4,1,4,1,4,1,4,1,4,1,4,1,4"
+          - "--modelname=CpNltNetFull_ML100_32l_512e_r4"
           - "--resblocktype=4"
-          - "--epochs=14"
+          - "--epochs=12"
+          - "--batch_size=64"
         resources:
           # these are the hardware resources the container needs 
           # as a minimum in order to run. the pod won't be scheduled
@@ -56,7 +57,7 @@ spec:
             cpu: "2000m" 
             # memory units are also defined by a suffix. typically this will
             # be "Mi" or "Gi" as appropriate
-            memory: "8Gi"
+            memory: "16Gi"
             # GPUs are slightly different as they're not natively supported
             # by Kubernetes. This indicates that the container requires 1 
             # GPU in order to run
@@ -72,7 +73,7 @@ spec:
           # and the others will not be visible to code inside it
           limits:
             cpu: "4000m" 
-            memory: "10Gi"
+            memory: "24Gi"
             nvidia.com/gpu: 1 
         # this says "mount the external volume 'nfs-access' at the location /nfs
         # inside this container"
