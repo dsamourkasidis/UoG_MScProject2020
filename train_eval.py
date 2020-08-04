@@ -223,16 +223,15 @@ class Trainer(ABC):
 
                 self.optimizer.zero_grad()
 
-                # all_params = torch.cat([x.view(-1) for x in self.model.parameters()])
-                # lambda2 = 0.001
-                # l2_regularization = lambda2 * torch.norm(all_params, 2)
-                #
-                # loss = loss + l2_regularization
+                all_params = torch.cat([x.view(-1) for x in self.model.parameters()])
+                lambda2 = 0.001
+                l2_regularization = lambda2 * torch.norm(all_params, 2)
+
+                loss = loss + l2_regularization
                 loss.backward()
                 self.optimizer.step()
 
                 total_step += 1
-                val_acc = evaluator.evaluate(self.model, 'val')
                 if total_step % 500 == 0:
                     logger.log("the loss in %dth batch is: %f" % (total_step, loss.item()), self.model_name)
                     logger.log("Epoch {}......Batch: {}/{}....... Loss: {}".format(epoch, counter,

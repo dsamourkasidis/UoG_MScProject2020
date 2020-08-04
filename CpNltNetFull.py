@@ -6,8 +6,8 @@ import torch
 import torch.nn as nn
 import argparse
 import train_eval
-from utility import set_device, calculate_simple_hit
-import residual_block as res_blk
+from utility import set_device
+from CpRec import residual_block as res_blk
 import pandas as pd
 import numpy as np
 import os
@@ -131,7 +131,7 @@ class CpNltNetFullEvaluator(train_eval.Evaluator):
         targets = sessions[:, 1:]
         targets = torch.stack([torch.from_numpy(np.array(i, dtype=np.long)) for i in targets]).long()
         val_data = TensorDataset(inputs, len_inputs, targets)
-        val_loader = DataLoader(val_data, shuffle=True, batch_size=16)
+        val_loader = DataLoader(val_data, shuffle=True, batch_size=self.args.batch_size)
         return val_loader
 
     def evaluate(self, model, val_or_test):

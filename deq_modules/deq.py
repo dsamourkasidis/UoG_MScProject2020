@@ -16,21 +16,21 @@ from deq_modules.broyden import broyden, analyze_broyden
 class RootFind(Function):
     """ Generic DEQ module that uses Broyden's method to find the equilibrium state """
     @staticmethod
-    def f(func, z1ss, uss, z0, *args):
-        return func(z1ss, uss, z0, *args)
+    def f(func, z1ss, uss, *args):
+        return func(z1ss, uss, *args)
 
     @staticmethod
-    def g(func, z1ss, uss, z0, *args):
-        return RootFind.f(func, z1ss, uss, z0, *args) - z1ss
+    def g(func, z1ss, uss, *args):
+        return RootFind.f(func, z1ss, uss, *args) - z1ss
 
     @staticmethod
-    def broyden_find_root(func, z1ss, uss, z0, eps, *args):
+    def broyden_find_root(func, z1ss, uss, eps, *args):
         bsz, d_model, seq_len = z1ss.size()
         z1ss_est = z1ss.clone().detach()
         threshold = args[-2]    # Can also set this to be different, based on training/inference
         train_step = args[-1]
 
-        g = lambda x: RootFind.g(func, x, uss, z0, *args)
+        g = lambda x: RootFind.g(func, x,  *args)
         result_info = broyden(g, z1ss_est, threshold=threshold, eps=eps, name="forward")
         z1ss_est = result_info['result']
             
@@ -39,13 +39,13 @@ class RootFind(Function):
         return z1ss_est.clone().detach()
 
     @staticmethod
-    def forward(ctx, func, z1ss, uss, z0, *args):
+    def forward(ctx, func, z1ss, uss,  *args):
         bsz, d_model, seq_len = z1ss.size()
         eps = 1e-6 * np.sqrt(bsz * seq_len * d_model)
         root_find = RootFind.broyden_find_root
         ctx.args_len = len(args)
         with torch.no_grad():
-            z1ss_est = root_find(func, z1ss, uss, z0, eps, *args)   # args include pos_emb, threshold, train_step
+            z1ss_est = root_find(func, z1ss, uss, eps, *args)   # args include pos_emb, threshold, train_step
 
             # If one would like to analyze the convergence process (e.g., failures, stability), should
             # insert here or in broyden_find_root.
@@ -69,7 +69,7 @@ class DEQModule(nn.Module):
         self.func = func
         self.func_copy = func_copy
 
-    def forward(self, z1s, us, z0, **kwargs):
+    def forward(self, z1s, us, **kwargs):
         raise NotImplemented
 
     class Backward(Function):
@@ -82,8 +82,8 @@ class DEQModule(nn.Module):
             
         """
         @staticmethod
-        def forward(ctx, func_copy, z1ss, uss, z0, *args):
-            ctx.save_for_backward(z1ss, uss, z0)
+        def forward(ctx, func_copy, z1ss, uss, *args):
+            ctx.save_for_backward(z1ss, uss)
             ctx.func = func_copy
             ctx.args = args
             return z1ss
@@ -95,17 +95,16 @@ class DEQModule(nn.Module):
             # grad should have dimension (bsz x d_model x seq_len)
             bsz, d_model, seq_len = grad.size()
             grad = grad.clone()
-            z1ss, uss, z0 = ctx.saved_tensors
+            z1ss, uss = ctx.saved_tensors
             args = ctx.args
             threshold, train_step = args[-2:]
 
             func = ctx.func
             z1ss = z1ss.clone().detach().requires_grad_()
             uss = uss.clone().detach()
-            z0 = z0.clone().detach()
 
             with torch.enable_grad():
-                y = RootFind.g(func, z1ss, uss, z0, *args)
+                y = RootFind.g(func, z1ss, uss, *args)
 
             def g(x):
                 y.backward(x, retain_graph=True)   # Retain for future calls to g
@@ -115,11 +114,8 @@ class DEQModule(nn.Module):
 
             eps = 2e-10 * np.sqrt(bsz * seq_len * d_model)
             dl_df_est = torch.zeros_like(grad)
-
             result_info = broyden(g, dl_df_est, threshold=threshold, eps=eps, name="backward")
             dl_df_est = result_info['result']
-            
             y.backward(torch.zeros_like(dl_df_est), retain_graph=False)
-
             grad_args = [None for _ in range(len(args))]
             return (None, dl_df_est, None, None, *grad_args)
