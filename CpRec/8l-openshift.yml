@@ -37,7 +37,7 @@ spec:
         command: 
           - "python3"
         args:
-          - /nfs/2490178/UoG_MScProject2020/CpNltNetFull.py
+          - /nfs/2490178/UoG_MScProject2020/CpNltNet.py
           - "--data=data/ML100"
           - "--dilations=1,4,1,4"
           - "--modelname=CpNltNetFull_ML100_8l_512e_r4"

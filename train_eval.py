@@ -216,6 +216,7 @@ class Trainer(ABC):
                 out = self.get_model_out(state.to(self.device).long(), len_state.to(self.device).long())
                 target = self.preprocess_target(target)
                 loss = criterion(out, target.to(self.device).long())
+
                 del state
                 del len_state
                 gc.collect()
@@ -233,21 +234,20 @@ class Trainer(ABC):
 
                 total_step += 1
                 if total_step % 500 == 0:
-                    logger.log("the loss in %dth batch is: %f" % (total_step, loss.item()), self.model_name)
                     logger.log("Epoch {}......Batch: {}/{}....... Loss: {}".format(epoch, counter,
                                                                               len(train_loader),
                                                                               loss.item()), self.model_name)
-                if total_step % self.evaluation_steps == 0:
-                    val_acc = evaluator.evaluate(self.model, 'val')
-                    self.model.train()
-                    is_best = val_acc > max_acc
-                    max_acc = max(max_acc, val_acc)
-                    checkpoint_handler.save_checkpoint({
-                        'epoch': epoch + 1,
-                        'state_dict': self.model.state_dict(),
-                        'max_acc': max_acc,
-                        'optimizer': self.optimizer.state_dict(),
-                    }, is_best)
+
+            val_acc = evaluator.evaluate(self.model, 'val')
+            self.model.train()
+            is_best = val_acc > max_acc
+            max_acc = max(max_acc, val_acc)
+            checkpoint_handler.save_checkpoint({
+                'epoch': epoch + 1,
+                'state_dict': self.model.state_dict(),
+                'max_acc': max_acc,
+                'optimizer': self.optimizer.state_dict(),
+            }, is_best)
 
             current_time = time.perf_counter()
             logger.log("Epoch {}/{} Done, Total Loss: {}".format(epoch, self.args.epochs, avg_loss / len(train_loader)), self.model_name)

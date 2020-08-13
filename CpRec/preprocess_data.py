@@ -50,8 +50,8 @@ def split_sessions_val(sessions):
     return train_sessions, val_sessions
 
 if __name__ == '__main__':
-    data_dir = '../data/ML100'
-    datacsv = 'mllatest_ls100.csv'
+    data_dir = '../data/ML20'
+    datacsv = 'mllatest_ls20.csv'
     sessions, max_len, item_num = preprocess_movielens20(data_dir + '/' + datacsv)
 
     dic = {'state_size': [max_len], 'item_num': [item_num]}

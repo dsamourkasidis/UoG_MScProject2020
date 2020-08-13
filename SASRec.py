@@ -1,114 +1,144 @@
-import sys, os, inspect
-currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-parentdir = os.path.dirname(currentdir)
-sys.path.insert(0, parentdir)
 import torch
 import torch.nn as nn
 import argparse
+from utility import extract_axis_1_torch, normalize, set_device
+from SASRecModules import multihead_attention, feedforward, LayerNorm
 import train_eval
-from utility import set_device
-import NltNetModules as nlt_modules
+import os
 import pandas as pd
 import numpy as np
-import os
-import logger
 from torch.utils.data import TensorDataset, DataLoader
-# import CpRec.BlockWiseEmbedding as block_emb
+import logger
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run supervised GRU.")
+    parser = argparse.ArgumentParser(description="Run SASRec.")
 
     parser.add_argument('--mode', default='train',
                         help='Train or test the model. "train" or "test"')
-    parser.add_argument('--epochs', type=int, default=14,
+    parser.add_argument('--epochs', type=int, default=4,
                         help='Number of max epochs.')
-    parser.add_argument('--data', nargs='?', default='data/ML100',
+    parser.add_argument('--data', nargs='?', default='data\ML100',
                         help='data directory')
     parser.add_argument('--resume', type=int, default=1,
                         help='flag for resume. 1: resume training; 0: train from start')
     parser.add_argument('--batch_size', type=int, default=16,
                         help='Batch size.')
-    parser.add_argument('--hidden_factor', type=int, default=16,
+    parser.add_argument('--hidden_factor', type=int, default=64,
                         help='Number of hidden factors, i.e., embedding size.')
-    parser.add_argument('--lr', type=float, default=0.001,
+    parser.add_argument('--lr', type=float, default=0.01,
                         help='Learning rate.')
-    parser.add_argument('--dilations', type=str, default="1,4,1,4",
-                        help='dilations for res blocks. eg "1,4,1,4"')
-    parser.add_argument('--modelname', type=str, default="CpNltNet_ML100_8layers_adjblk",
+    parser.add_argument('--num_heads', default=1, type=int)
+    parser.add_argument('--num_blocks', default=4, type=int)
+    parser.add_argument('--dropout_rate', default=0.1, type=float)
+    parser.add_argument('--modelname', type=str, default="SASrec_256_64",
                         help='model name. eg for checkpoint filename')
-    parser.add_argument('--resblocktype', type=int, default=4,
-                        help='Residual block type. 0-Simple, 1-CROSSLAYER, 2-CROSSBLOCK, 3-ADJACENTLAYER, 4-ADJACENTBLOCK')
     return parser.parse_args()
-    
 
-class CpNltNet(nn.Module):
-    def __init__(self, hidden_size, item_num, device, model_params):
-        super(CpNltNet, self).__init__()
+
+class SASRecTorch(nn.Module):
+    def __init__(self, item_num, state_size, device, model_params):
+        super(SASRecTorch, self).__init__()
+        self.hidden_size = model_params['hidden_factor']
+        self.item_num = int(item_num)
+        self.state_size = state_size
         self.device = device
-        self.hidden_size = hidden_size
-        self.item_num = item_num
-        self.model_params = model_params
-
-        # --------------------
-        # 1. Embeddings
-#        self.item_embeddings = block_emb.BlockWiseEmbeddingForInput(item_num, self.hidden_size, device,
- #                                                                   self.emb_param['block'], self.emb_param['factor'])
+        self.num_blocks = model_params['num_blocks']
+        self.num_heads = model_params['num_heads']
+        self.dropout_rate = model_params['dropout_rate']
         self.item_embeddings = nn.Embedding(
-            num_embeddings=item_num + 1,
+            num_embeddings=self.item_num+1,
             embedding_dim=self.hidden_size,
-            # padding_idx=padding_idx
         )
+        self.pos_embeddings = nn.Embedding(
+            num_embeddings=self.state_size,
+            embedding_dim=self.hidden_size,
+        )
+        
         # init embedding
         nn.init.normal_(self.item_embeddings.weight, 0, 0.01)
-        # ---------------------
-        # 2. Residual blocks
-        residual_blocks = []
-        bl = self.create_residual(self.model_params['resblocktype'], self.model_params['dilations'][0], self.hidden_size, self.model_params['dilated_channels'],
-                                                  self.model_params['kernel_size'], 0, None)
-                                                  
-        residual_blocks.append(bl)
-        for layer_id, dil in enumerate(self.model_params['dilations'][1:]):
-            bl = self.create_residual(self.model_params['resblocktype'], dil, self.hidden_size, self.model_params['dilated_channels'],
-                                                  self.model_params['kernel_size'], layer_id+1, bl)
-            residual_blocks.append(bl)
-        self.res_dil_convs = nn.ModuleList(residual_blocks)
+        nn.init.normal_(self.pos_embeddings.weight, 0, 0.01)
+        
+        #Multihead Attention Layer
+        multiheads = []
+        multiheads_norms = []
+        for i in range(self.num_blocks):
+            multiheads.append(multihead_attention(num_units=self.hidden_size,
+                                                  num_heads=self.num_heads, dropout_rate=self.dropout_rate,
+                                                  causality=True,with_qk=False,hidden_size=self.hidden_size))
+            multiheads_norms.append(LayerNorm(self.hidden_size))
+        self.multihead_attns = nn.ModuleList(multiheads)
+        self.multihead_attns_norms = nn.ModuleList(multiheads_norms)
+        # self.layer_norm = LayerNorm(state_size-1)
 
-        # ---------------------
-        # 3. Final conv
-        self.fconv = nn.Conv2d(in_channels=self.hidden_size, out_channels=item_num,
-                               kernel_size=1, padding=0, dilation=1, bias=True)
+        #Feedforward Layer
+        feedforwards = []
+        feedforwards_norms = []
+        for i in range(self.num_blocks):
+            feedforwards.append(feedforward(in_channels=state_size-1, num_units=[self.hidden_size,self.hidden_size],
+                                            dropout_rate=self.dropout_rate))
+            feedforwards_norms.append(LayerNorm(self.hidden_size))
+        self.feedforward_layers = nn.ModuleList(feedforwards)
+        self.feedforward_layers_norms = nn.ModuleList(feedforwards_norms)
 
+        #dropout
+        self.dropout = nn.Dropout(self.dropout_rate)
+
+        self.f_layer_norm = LayerNorm(self.hidden_size)
+        #Fully connected Layer
+        self.fc1 = nn.Linear(self.hidden_size,self.item_num)
+        
     def forward(self, inputs, inputs_lengths):
-        # ---------------------
-        # 1. embed the input
-        context_embedding = self.item_embeddings(inputs)
+        input_emb = self.item_embeddings(inputs)
+        pos_emb_input = inputs.size(0) * [torch.arange(start=0, end=inputs.size(1)).unsqueeze(0)]
+        pos_emb_input = torch.cat(pos_emb_input)
+        pos_emb_input = pos_emb_input.long().to(self.device)
+        pos_emb = self.pos_embeddings(pos_emb_input)
+        x = input_emb+pos_emb
+            
+        x = self.dropout(x)
 
-        dilate_output = context_embedding
-        for dilated in self.res_dil_convs:
-            dilate_output = dilated(dilate_output)
+        padid = 0
+        mask = torch.ne(inputs, padid).float().unsqueeze(-1)
+        x = x * mask
+            
+        for i in range (self.num_blocks):
+            x = self.multihead_attns[i](queries=self.multihead_attns_norms[i](x), keys=x)
+            x = self.feedforward_layers[i](self.feedforward_layers_norms[i](x))
+            x = x * mask
+            
+        x = self.f_layer_norm(x)
+        #out = self.extract_unpadded(x, inputs_lengths-1)
+        #out = self.fc1(out)
+        indcs = torch.ones(inputs.size(0)) * 99
+        out = self.extract_unpadded(x, indcs.long().to(self.device)-1)
+        out = self.fc1(out)
+        return out
 
-        dilate_output = dilate_output.permute(0, 2, 1)
-        dilate_output = dilate_output.unsqueeze(dim=2)
-        conv_output = self.fconv(dilate_output)
-        conv_output = conv_output.squeeze(dim=2)
-        conv_output = conv_output.permute(0, 2, 1)
-        return conv_output
-    
-    def create_residual(self, blocktype, dilation, in_channels, out_channels, kernel_size, block_id, prev_blk):
-        if blocktype == nlt_modules.ResidualBlockType.SIMPLE.value:
-            return nlt_modules.SimpleResidualBlock(dilation, in_channels, out_channels, kernel_size, self.model_params['seqlen'], block_id, prev_blk)
-        elif blocktype == nlt_modules.ResidualBlockType.CROSS_LAYER.value:
-            return nlt_modules.CpResidualBlockCrossLayer(dilation, in_channels, out_channels, kernel_size, self.model_params['seqlen'], block_id, prev_blk)
-        elif blocktype == nlt_modules.ResidualBlockType.CROSS_BLOCK.value:
-            return nlt_modules.SimpleResidualBlock(dilation, in_channels, out_channels, kernel_size, self.model_params['seqlen'], block_id, prev_blk)
-        elif blocktype == nlt_modules.ResidualBlockType.ADJACENT_LAYER.value:
-            return nlt_modules.CpResidualBlockAdjacentLayer(dilation, in_channels, out_channels, kernel_size, self.model_params['seqlen'], block_id, prev_blk)
-        elif blocktype == nlt_modules.ResidualBlockType.ADJACENT_BLOCK.value:
-            return nlt_modules.CpResidualBlockAdjacentBlock(dilation, in_channels, out_channels, kernel_size, self.model_params['seqlen'], block_id, prev_blk)
+    # def layer_norm(self, x, epsilon=1e-8):
+    #     shape = x.shape
+    #     x = x.permute(0, 2, 1)
+    #     mean = x.mean(dim=len(shape) - 1, keepdim=True)
+    #     variance = x.var(dim=len(shape) - 1, keepdim=True)
+    #
+    #     x = (x - mean) / torch.sqrt(variance + epsilon)
+    #     y = x.permute(0, 2, 1)
+    #     return y
 
+    def extract_unpadded(self, data, ind):
+        """
+        Get true elements from each sequence (not padded)
+        :param data: Tensorflow tensor that will be subsetted.
+        :param ind: Indices to take (one for each element along axis 0 of data).
+        :return: Subsetted tensor.
+        """
+        batch_range = torch.arange(0, data.shape[0], dtype=torch.int64).to(self.device)
+        indices = torch.stack([batch_range, ind], dim=1)
+        res = data[indices.transpose(0, 1).tolist()]
+        return res
+            
 
-class CpNltNetEvaluator(train_eval.Evaluator):
+class SASRecEvaluator(train_eval.Evaluator):
     def get_prediction(self, model, states, len_states, device):
         prediction = model(states.to(device).long(), len_states.to(device).long())
         return prediction
@@ -143,7 +173,7 @@ class CpNltNetEvaluator(train_eval.Evaluator):
                 del states
                 del len_states
                 torch.cuda.empty_cache()
-                sorted_list = np.argsort(prediction[:, -1, :].tolist())
+                sorted_list = np.argsort(prediction.tolist())
 
                 def cal_hit(sorted_list, topk, true_items, hit, ndcg):
                     for i in range(len(topk)):
@@ -174,14 +204,11 @@ class CpNltNetEvaluator(train_eval.Evaluator):
                 return val_acc
 
 
-class CpNltNetTrainer(train_eval.Trainer):
+class SASRecTrainer(train_eval.Trainer):
 
     def create_model(self, model_params):
-        cpNltNetTorch = CpNltNet(hidden_size=self.args.hidden_factor, item_num=self.item_num,
-                                 device=self.device, model_params=model_params)
-        total_params = sum(p.numel() for p in cpNltNetTorch.parameters() if p.requires_grad)
-        print(cpNltNetTorch)
-        return cpNltNetTorch
+        sasrecTorch = SASRecTorch(item_num=item_num, state_size=state_size, device=device, model_params=model_params)
+        return sasrecTorch
 
     def get_model_out(self, state, len_state):
         out = self.model(state, len_state)
@@ -193,8 +220,8 @@ class CpNltNetTrainer(train_eval.Trainer):
         return target
 
     def get_evaluator(self, device, args, data_directory, state_size, item_num):
-        cpNlt_evaluator = CpNltNetEvaluator(device, args, data_directory, state_size, item_num)
-        return cpNlt_evaluator
+        sasrec_evaluator = SASRecEvaluator(device, args, data_directory, state_size, item_num)
+        return sasrec_evaluator
 
     def create_optimizer(self):
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.lr)
@@ -210,22 +237,23 @@ TEST = 'test'
 
 
 def train_model(args, device, state_size, item_num, model_name, model_param, train_loader):
-    nlt_trainer = CpNltNetTrainer(model_name, args, device, state_size, item_num, model_param)
-    nlt_trainer.train(train_loader)
+    sasrec_trainer = SASRecTrainer(model_name, args, device, state_size, item_num, model_param)
+    sasrec_trainer.train(train_loader)
 
 
 def test_model(device, args, data_directory, state_size, item_num, model_name, model_params):
-    cpNltTorch = CpNltNet(hidden_size=args.hidden_factor, item_num=item_num, device=device, model_params=model_params)
+    sasrecTorch = SASRecTorch(item_num=item_num, state_size=state_size, device=device, model_params=model_params)
+
     checkpoint_handler = train_eval.CheckpointHandler(model_name, device)
-    optimizer = torch.optim.Adam(cpNltTorch.parameters(), lr=args.lr)
-    _, _ = checkpoint_handler.load_from_checkpoint(True, cpNltTorch, optimizer)
-    cpNltTorch.to(device)
+    optimizer = torch.optim.Adam(sasrecTorch.parameters(), lr=args.lr)
+    _, _ = checkpoint_handler.load_from_checkpoint(True, sasrecTorch, optimizer)
+    sasrecTorch.to(device)
 
-    cpNlt_evaluator = CpNltNetEvaluator(device, args, data_directory, state_size, item_num)
-    cpNlt_evaluator.evaluate(cpNltTorch, 'test')
+    sasrec_evaluator = SASRecEvaluator(device, args, data_directory, state_size, item_num)
+    sasrec_evaluator.evaluate(sasrecTorch, 'val')
 
 
-#prepare a dataloader as described in nextlt paper: input :{1,2,3,4,5} output:{2,3,4,5,6}
+#prepare a dataloader: input :{1,2,3,4,5} output:{6}
 def prepare_dataloader_whole(data_dir, batch_size):
     basepath = os.path.dirname(__file__)
     sessions_df = pd.read_pickle(os.path.abspath(os.path.join(basepath, data_dir, 'train_sessions.df')))
@@ -234,7 +262,7 @@ def prepare_dataloader_whole(data_dir, batch_size):
     inputs = torch.stack([torch.from_numpy(np.array(i, dtype=np.long)) for i in inputs]).long()
     len_inputs = [np.count_nonzero(i) for i in inputs]
     len_inputs = torch.from_numpy(np.fromiter(len_inputs, dtype=np.long)).long()
-    targets = sessions[:, 1:]
+    targets = sessions[:, -1]
     targets = torch.stack([torch.from_numpy(np.array(i, dtype=np.long)) for i in targets]).long()
     train_data = TensorDataset(inputs, len_inputs, targets)
     train_loader = DataLoader(train_data, shuffle=True, batch_size=batch_size)
@@ -252,19 +280,14 @@ if __name__ == '__main__':
     train_loader = prepare_dataloader_whole(data_directory, args.batch_size)
 
     model_param = {
-        'dilated_channels': args.hidden_factor,  # larger is better until 512 or 1024
-        'dilations': [int(item) for item in args.dilations.split(',')],  # YOU should tune this hyper-parameter, refer to the paper.
-        'kernel_size': 3,
-        'resblocktype': args.resblocktype,
-        'seqlen' : state_size
-        # 'param-share' : ''
+        'hidden_factor': args.hidden_factor,  # larger is better until 512 or 1024
+        'num_blocks' : args.num_blocks,
+        'num_heads' : args.num_heads,
+        'dropout_rate' : args.dropout_rate
     }
 
-    
-    
+
     if args.mode.lower() == TRAIN:
         train_model(args, device, state_size, item_num, model_name, model_param, train_loader)
     else:
         test_model(device, args, data_directory, state_size, item_num, model_name, model_param)
-
-

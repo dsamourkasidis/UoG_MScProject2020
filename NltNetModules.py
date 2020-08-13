@@ -21,24 +21,24 @@ class ResidualBlock(nn.Module):
 
 
 class SimpleResidualBlock(ResidualBlock):
-    def __init__(self, dilation, in_channels, out_channels, kernel_size, seqlen, block_id, prev_blk):
+    def __init__(self, dilation, in_channels, out_channels, kernel_size, block_id):
         super(SimpleResidualBlock, self).__init__(kernel_size, dilation, block_id)
         self.conv1 = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(1, kernel_size),
                                padding=0, dilation=dilation, bias=True)
-        self.layer_norm1 = nn.LayerNorm([in_channels, seqlen-1])
+        self.layer_norm1 = LayerNorm(in_channels)
         self.rel1 = nn.ReLU()
         self.conv2 = nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=(1, kernel_size),
-                               padding=0, dilation=2*dilation, bias=True)
-        self.layer_norm2 = nn.LayerNorm([in_channels, seqlen-1])
+                               padding=0, dilation=2 * dilation, bias=True)
+        self.layer_norm2 = LayerNorm(in_channels)
         self.rel2 = nn.ReLU()
-    
+
     def forward(self, inputs):
         inputs_conv = inputs.permute(0, 2, 1)
         y = self.forward_conv(self.conv1, inputs_conv, self.dilation)
         y = self.layer_norm1(y)
         y = self.rel1(y)
 
-        y = self.forward_conv(self.conv2, y, 2*self.dilation)
+        y = self.forward_conv(self.conv2, y, 2 * self.dilation)
         y = self.layer_norm2(y)
         y = self.rel2(y)
 
@@ -51,13 +51,13 @@ class CpResidualBlockCrossLayer(ResidualBlock):
         super(CpResidualBlockCrossLayer, self).__init__(kernel_size, dilation, block_id)
         if prev_blk is None:
             self.conv = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(1, kernel_size),
-                                   padding=0, dilation=dilation, bias=True)
+                                  padding=0, dilation=dilation, bias=True)
         else:
             self.conv = prev_blk.conv
 
-        self.layer_norm1 = nn.LayerNorm([in_channels, seqlen-1])
+        self.layer_norm1 = nn.LayerNorm([in_channels, seqlen - 1])
         self.rel1 = nn.ReLU()
-        self.layer_norm2 = nn.LayerNorm([in_channels, seqlen-1])
+        self.layer_norm2 = nn.LayerNorm([in_channels, seqlen - 1])
         self.rel2 = nn.ReLU()
 
     def forward(self, inputs):
@@ -68,7 +68,7 @@ class CpResidualBlockCrossLayer(ResidualBlock):
         y = self.layer_norm1(y)
         y = self.rel1(y)
 
-        y = self.forward_conv(self.conv, y, 2*self.dilation)
+        y = self.forward_conv(self.conv, y, 2 * self.dilation)
         y = self.layer_norm2(y)
         y = self.rel2(y)
 
@@ -81,12 +81,12 @@ class CpResidualBlockAdjacentLayer(ResidualBlock):
         super(CpResidualBlockAdjacentLayer, self).__init__(kernel_size, dilation, block_id)
 
         self.conv = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(1, kernel_size),
-                                   padding=0, dilation=dilation, bias=True)
+                              padding=0, dilation=dilation, bias=True)
 
-        self.layer_norm1 = nn.LayerNorm([in_channels, seqlen-1])
+        self.layer_norm1 = nn.LayerNorm([in_channels, seqlen - 1])
         self.rel1 = nn.ReLU()
 
-        self.layer_norm2 = nn.LayerNorm([in_channels, seqlen-1])
+        self.layer_norm2 = nn.LayerNorm([in_channels, seqlen - 1])
         self.rel2 = nn.ReLU()
 
     def forward(self, inputs):
@@ -115,15 +115,15 @@ class CpResidualBlockAdjacentBlock(ResidualBlock):
             self.conv2 = prev_blk.conv2
         else:
             self.conv1 = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(1, kernel_size),
-                                  padding=0, dilation=dilation, bias=True)
+                                   padding=0, dilation=dilation, bias=True)
             self.conv2 = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(1, kernel_size),
-                                  padding=0, dilation=dilation, bias=True)
+                                   padding=0, dilation=dilation, bias=True)
 
-        #self.layer_norm1 = nn.LayerNorm([in_channels, seqlen-1])
+        # self.layer_norm1 = nn.LayerNorm([in_channels, seqlen-1])
         self.layer_norm1 = LayerNorm(out_channels)
         self.rel1 = nn.ReLU()
 
-        #self.layer_norm2 = nn.LayerNorm([in_channels, seqlen-1])
+        # self.layer_norm2 = nn.LayerNorm([in_channels, seqlen-1])
         self.layer_norm2 = LayerNorm(out_channels)
         self.rel2 = nn.ReLU()
 
@@ -164,8 +164,8 @@ class LayerNorm(nn.Module):
     def forward(self, x):
         shape = x.shape
         x = x.permute(0, 2, 1)
-        mean = x.mean(dim=len(shape)-1, keepdim=True)
-        variance = x.var(dim=len(shape)-1, keepdim =True)
+        mean = x.mean(dim=len(shape) - 1, keepdim=True)
+        variance = x.var(dim=len(shape) - 1, keepdim=True)
 
         x = (x - mean) / torch.sqrt(variance + self.epsilon)
         y = self.gamma * x + self.beta

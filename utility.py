@@ -115,4 +115,3 @@ def set_device():
         device = torch.device("cpu")
     return device
 
-    
