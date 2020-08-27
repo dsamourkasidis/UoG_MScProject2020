@@ -23,19 +23,19 @@ def parse_args():
                         help='Train or test the model. "train" or "test"')
     parser.add_argument('--epochs', type=int, default=14,
                         help='Number of max epochs.')
-    parser.add_argument('--data', nargs='?', default='data/ML100',
+    parser.add_argument('--data', nargs='?', default='data/ML20',
                         help='data directory')
     parser.add_argument('--resume', type=int, default=1,
                         help='flag for resume. 1: resume training; 0: train from start')
-    parser.add_argument('--batch_size', type=int, default=16,
+    parser.add_argument('--batch_size', type=int, default=256,
                         help='Batch size.')
-    parser.add_argument('--hidden_factor', type=int, default=16,
+    parser.add_argument('--hidden_factor', type=int, default=64,
                         help='Number of hidden factors, i.e., embedding size.')
     parser.add_argument('--lr', type=float, default=0.001,
                         help='Learning rate.')
     parser.add_argument('--dilations', type=str, default="1,4,1,4",
                         help='dilations for res blocks. eg "1,4,1,4"')
-    parser.add_argument('--modelname', type=str, default="CpNltNet_ML100_8layers_adjblk",
+    parser.add_argument('--modelname', type=str, default="cpnltnet-ml20sss-32-64-256",
                         help='model name. eg for checkpoint filename')
     parser.add_argument('--resblocktype', type=int, default=4,
                         help='Residual block type. 0-Simple, 1-CROSSLAYER, 2-CROSSBLOCK, 3-ADJACENTLAYER, 4-ADJACENTBLOCK')
@@ -180,7 +180,7 @@ class CpNltNetTrainer(train_eval.Trainer):
         cpNltNetTorch = CpNltNet(hidden_size=self.args.hidden_factor, item_num=self.item_num,
                                  device=self.device, model_params=model_params)
         total_params = sum(p.numel() for p in cpNltNetTorch.parameters() if p.requires_grad)
-        print(cpNltNetTorch)
+        print(total_params)
         return cpNltNetTorch
 
     def get_model_out(self, state, len_state):
@@ -222,7 +222,7 @@ def test_model(device, args, data_directory, state_size, item_num, model_name, m
     cpNltTorch.to(device)
 
     cpNlt_evaluator = CpNltNetEvaluator(device, args, data_directory, state_size, item_num)
-    cpNlt_evaluator.evaluate(cpNltTorch, 'test')
+    cpNlt_evaluator.evaluate(cpNltTorch, 'val')
 
 
 #prepare a dataloader as described in nextlt paper: input :{1,2,3,4,5} output:{2,3,4,5,6}

@@ -18,11 +18,11 @@ def parse_args():
                         help='Train or test the model. "train" or "test"')
     parser.add_argument('--epochs', type=int, default=4,
                         help='Number of max epochs.')
-    parser.add_argument('--data', nargs='?', default='data\ML100',
+    parser.add_argument('--data', nargs='?', default='data\Steam',
                         help='data directory')
     parser.add_argument('--resume', type=int, default=1,
                         help='flag for resume. 1: resume training; 0: train from start')
-    parser.add_argument('--batch_size', type=int, default=16,
+    parser.add_argument('--batch_size', type=int, default=256,
                         help='Batch size.')
     parser.add_argument('--hidden_factor', type=int, default=64,
                         help='Number of hidden factors, i.e., embedding size.')
@@ -36,9 +36,9 @@ def parse_args():
     return parser.parse_args()
 
 
-class SASRecTorch(nn.Module):
+class CpSASRecTorch(nn.Module):
     def __init__(self, item_num, state_size, device, model_params):
-        super(SASRecTorch, self).__init__()
+        super(CpSASRecTorch, self).__init__()
         self.hidden_size = model_params['hidden_factor']
         self.item_num = int(item_num)
         self.state_size = state_size
@@ -116,7 +116,7 @@ class SASRecTorch(nn.Module):
         return res
 
 
-class SASRecEvaluator(train_eval.Evaluator):
+class CpSASRecEvaluator(train_eval.Evaluator):
     def get_prediction(self, model, states, len_states, device):
         prediction = model(states.to(device).long(), len_states.to(device).long())
         return prediction
@@ -183,11 +183,13 @@ class SASRecEvaluator(train_eval.Evaluator):
                 return val_acc
 
 
-class SASRecTrainer(train_eval.Trainer):
+class CpSASRecTrainer(train_eval.Trainer):
 
     def create_model(self, model_params):
-        sasrecTorch = SASRecTorch(item_num=item_num, state_size=state_size, device=device, model_params=model_params)
-        return sasrecTorch
+        cpsasrecTorch = CpSASRecTorch(item_num=item_num, state_size=state_size, device=device, model_params=model_params)
+        total_params = sum(p.numel() for p in cpsasrecTorch.parameters() if p.requires_grad)
+        print(total_params)
+        return cpsasrecTorch
 
     def get_model_out(self, state, len_state):
         out = self.model(state, len_state)
@@ -199,7 +201,7 @@ class SASRecTrainer(train_eval.Trainer):
         return target
 
     def get_evaluator(self, device, args, data_directory, state_size, item_num):
-        sasrec_evaluator = SASRecEvaluator(device, args, data_directory, state_size, item_num)
+        sasrec_evaluator = CpSASRecEvaluator(device, args, data_directory, state_size, item_num)
         return sasrec_evaluator
 
     def create_optimizer(self):
@@ -216,19 +218,19 @@ TEST = 'test'
 
 
 def train_model(args, device, state_size, item_num, model_name, model_param, train_loader):
-    sasrec_trainer = SASRecTrainer(model_name, args, device, state_size, item_num, model_param)
+    sasrec_trainer = CpSASRecTrainer(model_name, args, device, state_size, item_num, model_param)
     sasrec_trainer.train(train_loader)
 
 
 def test_model(device, args, data_directory, state_size, item_num, model_name, model_params):
-    sasrecTorch = SASRecTorch(item_num=item_num, state_size=state_size, device=device, model_params=model_params)
+    sasrecTorch = CpSASRecTorch(item_num=item_num, state_size=state_size, device=device, model_params=model_params)
 
     checkpoint_handler = train_eval.CheckpointHandler(model_name, device)
     optimizer = torch.optim.Adam(sasrecTorch.parameters(), lr=args.lr)
     _, _ = checkpoint_handler.load_from_checkpoint(True, sasrecTorch, optimizer)
     sasrecTorch.to(device)
 
-    sasrec_evaluator = SASRecEvaluator(device, args, data_directory, state_size, item_num)
+    sasrec_evaluator = CpSASRecEvaluator(device, args, data_directory, state_size, item_num)
     sasrec_evaluator.evaluate(sasrecTorch, 'val')
 
 

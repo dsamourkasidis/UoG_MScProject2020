@@ -18,19 +18,19 @@ def parse_args():
                         help='Train or test the model. "train" or "test"')
     parser.add_argument('--epochs', type=int, default=30,
                         help='Number of max epochs.')
-    parser.add_argument('--data', nargs='?', default='data/ML20',
+    parser.add_argument('--data', nargs='?', default='data/Steam',
                         help='data directory')
     parser.add_argument('--resume', type=int, default=1,
                         help='flag for resume. 1: resume training; 0: train from start')
-    parser.add_argument('--batch_size', type=int, default=64,
+    parser.add_argument('--batch_size', type=int, default=256,
                         help='Batch size.')
-    parser.add_argument('--hidden_factor', type=int, default=8,
+    parser.add_argument('--hidden_factor', type=int, default=64,
                         help='Number of hidden factors, i.e., embedding size.')
     parser.add_argument('--lr', type=float, default=0.005,
                         help='Learning rate.')
     parser.add_argument('--dilations', type=str, default="1,4,1,4",
                         help='dilations for res blocks. eg "1,4,1,4"')
-    parser.add_argument('--modelname', type=str, default="CpNltNetFull_ML100_8layers_adjblk",
+    parser.add_argument('--modelname', type=str, default="nltnet-ml20-16-64-256",
                         help='model name. eg for checkpoint filename')
     return parser.parse_args()
 

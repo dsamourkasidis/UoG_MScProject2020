@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import argparse
 from utility import extract_axis_1_torch, normalize, set_device
-from SASRecModules import multihead_attention, feedforward, LayerNorm
+from SASRecModules import MultiheadAttention, Feedforward, LayerNorm, SelfAttentionBlock
 import train_eval
 import os
 import pandas as pd
@@ -18,11 +18,11 @@ def parse_args():
                         help='Train or test the model. "train" or "test"')
     parser.add_argument('--epochs', type=int, default=4,
                         help='Number of max epochs.')
-    parser.add_argument('--data', nargs='?', default='data\ML100',
+    parser.add_argument('--data', nargs='?', default='data\ML20',
                         help='data directory')
     parser.add_argument('--resume', type=int, default=1,
                         help='flag for resume. 1: resume training; 0: train from start')
-    parser.add_argument('--batch_size', type=int, default=16,
+    parser.add_argument('--batch_size', type=int, default=256,
                         help='Batch size.')
     parser.add_argument('--hidden_factor', type=int, default=64,
                         help='Number of hidden factors, i.e., embedding size.')
@@ -59,27 +59,13 @@ class SASRecTorch(nn.Module):
         nn.init.normal_(self.item_embeddings.weight, 0, 0.01)
         nn.init.normal_(self.pos_embeddings.weight, 0, 0.01)
         
-        #Multihead Attention Layer
-        multiheads = []
-        multiheads_norms = []
+        # Self Attention Blocks
+        self_att_blks_list = []
         for i in range(self.num_blocks):
-            multiheads.append(multihead_attention(num_units=self.hidden_size,
-                                                  num_heads=self.num_heads, dropout_rate=self.dropout_rate,
-                                                  causality=True,with_qk=False,hidden_size=self.hidden_size))
-            multiheads_norms.append(LayerNorm(self.hidden_size))
-        self.multihead_attns = nn.ModuleList(multiheads)
-        self.multihead_attns_norms = nn.ModuleList(multiheads_norms)
-        # self.layer_norm = LayerNorm(state_size-1)
-
-        #Feedforward Layer
-        feedforwards = []
-        feedforwards_norms = []
-        for i in range(self.num_blocks):
-            feedforwards.append(feedforward(in_channels=state_size-1, num_units=[self.hidden_size,self.hidden_size],
-                                            dropout_rate=self.dropout_rate))
-            feedforwards_norms.append(LayerNorm(self.hidden_size))
-        self.feedforward_layers = nn.ModuleList(feedforwards)
-        self.feedforward_layers_norms = nn.ModuleList(feedforwards_norms)
+            bl = SelfAttentionBlock(self.hidden_size, self.num_heads, self.dropout_rate,
+                                                 state_size, i+1, None)
+            self_att_blks_list.append(bl)
+        self.self_att_blks = nn.ModuleList(self_att_blks_list)
 
         #dropout
         self.dropout = nn.Dropout(self.dropout_rate)
@@ -101,16 +87,15 @@ class SASRecTorch(nn.Module):
         padid = 0
         mask = torch.ne(inputs, padid).float().unsqueeze(-1)
         x = x * mask
-            
-        for i in range (self.num_blocks):
-            x = self.multihead_attns[i](queries=self.multihead_attns_norms[i](x), keys=x)
-            x = self.feedforward_layers[i](self.feedforward_layers_norms[i](x))
+
+        for i in range(self.num_blocks):
+            x = self.self_att_blks[i](x)
             x = x * mask
             
         x = self.f_layer_norm(x)
         #out = self.extract_unpadded(x, inputs_lengths-1)
         #out = self.fc1(out)
-        indcs = torch.ones(inputs.size(0)) * 99
+        indcs = torch.ones(inputs.size(0)) * self.state_size-1
         out = self.extract_unpadded(x, indcs.long().to(self.device)-1)
         out = self.fc1(out)
         return out
@@ -208,6 +193,8 @@ class SASRecTrainer(train_eval.Trainer):
 
     def create_model(self, model_params):
         sasrecTorch = SASRecTorch(item_num=item_num, state_size=state_size, device=device, model_params=model_params)
+        total_params = sum(p.numel() for p in sasrecTorch.parameters() if p.requires_grad)
+        print(total_params)
         return sasrecTorch
 
     def get_model_out(self, state, len_state):
