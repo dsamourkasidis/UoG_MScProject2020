@@ -8,16 +8,16 @@ def to_pickled_df(data_directory, **kwargs):
         df.to_pickle(os.path.join(data_directory, name + '.df'))
 
 
-def pad_history(itemlist,length,pad_item):
-    if len(itemlist)>=length:
+def pad_history(itemlist, length, pad_item):
+    if len(itemlist) >= length:
         return itemlist[-length:]
-    if len(itemlist)<length:
+    if len(itemlist) < length:
         temp = [pad_item] * (length-len(itemlist))
         itemlist.extend(temp)
         return itemlist
 
 
-def torch_gather_nd(params,indices):
+def torch_gather_nd(params, indices):
     """
     This function is taken from Haozhe Xie's reply
     on the page, implementing tf.gather_nd in pytorch
@@ -25,7 +25,7 @@ def torch_gather_nd(params,indices):
     """
     x = []
     for i in range(len(indices)):
-        x.append(params[i,indices[i][-1],:].tolist())
+        x.append(params[i, indices[i][-1], :].tolist())
     x = torch.Tensor(x)
     return x
 
@@ -38,7 +38,7 @@ def extract_axis_1_torch(data, ind):
     :return: Subsetted tensor.
     """
 
-    batch_range = torch.range(start = 0, end = data.size(0)-1)
+    batch_range = torch.range(start=0, end=data.size(0)-1)
     batch_range = batch_range.long()
     ind = ind.long()
     indices = torch.stack([batch_range, ind], dim=1)
@@ -47,7 +47,7 @@ def extract_axis_1_torch(data, ind):
     return res
 
 
-def normalize(inputs,epsilon=1e-8):
+def normalize(inputs, epsilon=1e-8):
     '''Applies layer normalization.
 
     Args:
@@ -65,9 +65,9 @@ def normalize(inputs,epsilon=1e-8):
     #print (inputs_shape)
     params_shape = inputs_shape[-1:]
 
-    mean = inputs.mean(dim=-1,keepdim=True)
+    mean = inputs.mean(dim=-1, keepdim=True)
     #print (mean.size())
-    variance = inputs.var(dim=-1,keepdim=True)
+    variance = inputs.var(dim=-1, keepdim=True)
     beta = torch.zeros(params_shape)
     gamma = torch.ones(params_shape)
     num = inputs-mean
@@ -78,7 +78,8 @@ def normalize(inputs,epsilon=1e-8):
     return outputs
 
 
-def calculate_hit(sorted_list,topk,true_items,rewards,r_click,total_reward,hit_click,ndcg_click,hit_purchase,ndcg_purchase):
+def calculate_hit(sorted_list, topk, true_items, rewards, r_click,
+ total_reward, hit_click, ndcg_click, hit_purchase, ndcg_purchase):
     for i in range(len(topk)):
         rec_list = sorted_list[:, -topk[i]:]
         for j in range(len(true_items)):
@@ -93,10 +94,21 @@ def calculate_hit(sorted_list,topk,true_items,rewards,r_click,total_reward,hit_c
                     ndcg_purchase[i] += 1.0 / np.log2(rank + 1)
 
 
+def calculate_simple_hit(sorted_list, topk, true_items, hit, ndcg):
+    for i in range(len(topk)):
+        rec_list = sorted_list[:, -topk[i]:]
+        for j in range(len(true_items)):
+            if true_items[j] in rec_list[j]:
+                rank = topk[i] - np.argwhere(rec_list[j] == true_items[j])
+                hit[i] += 1.0
+                ndcg[i] += 1.0 / np.log2(rank + 1)
+
+
 def set_device():
     is_cuda = torch.cuda.is_available()
 
-    # If we have a GPU available, we'll set our device to GPU. We'll use this device variable later in our code.
+    # If we have a GPU available, we'll set our device to GPU. We'll use this
+    # device variable later in our code.
     if is_cuda:
         device = torch.device("cuda")
     else:
